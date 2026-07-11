@@ -360,4 +360,30 @@ describe('buildAudioTimeline — warnings & long sessions', () => {
     const running = startTimer(createInitialSnapshot(shortCfg), shortCfg, 0).snapshot;
     expect(buildAudioTimeline(running, shortCfg).some((c) => c.kind === 'warn')).toBe(false);
   });
+
+  it('adds a single 30s warning before each rest phase ends', () => {
+    // 3 rounds, 20s work (too short for its own warning) / 60s rest — no rest
+    // after the final round, so the session ends right after round 3's work.
+    const restCfg = config([
+      { workSeconds: 20, restSeconds: 60 },
+      { workSeconds: 20, restSeconds: 60 },
+      { workSeconds: 20, restSeconds: 0 },
+    ]);
+    const running = startTimer(createInitialSnapshot(restCfg), restCfg, 0).snapshot;
+    const restWarns = buildAudioTimeline(running, restCfg)
+      .filter((c) => c.kind === 'restWarn')
+      .map((c) => c.atMs);
+
+    // Rest 1 starts at 20s, ends at 80s → warning at 50s.
+    // Rest 2 starts at 100s, ends at 160s → warning at 130s.
+    expect(restWarns).toEqual([50000, 130000]);
+  });
+
+  it('omits the 30s rest warning for rests at or under 30s', () => {
+    const shortRestCfg = config([{ workSeconds: 20, restSeconds: 25 }]);
+    const running = startTimer(createInitialSnapshot(shortRestCfg), shortRestCfg, 0).snapshot;
+    expect(buildAudioTimeline(running, shortRestCfg).some((c) => c.kind === 'restWarn')).toBe(
+      false,
+    );
+  });
 });

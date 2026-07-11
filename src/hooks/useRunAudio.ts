@@ -83,6 +83,7 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
   const ctxRef = useRef<AudioContext | null>(null);
   const tickBufferRef = useRef<AudioBuffer | null>(null);
   const warnBufferRef = useRef<AudioBuffer | null>(null);
+  const restWarnBufferRef = useRef<AudioBuffer | null>(null);
   const completeBufferRef = useRef<AudioBuffer | null>(null);
   const gongCacheRef = useRef<Map<SoundId, AudioBuffer>>(new Map());
   const keepAliveElRef = useRef<HTMLAudioElement | null>(null);
@@ -155,6 +156,18 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
 
     void (async () => {
       try {
+        const response = await fetch(`${base}sounds/rest-warning.mp3`);
+        const decoded = await ctx.decodeAudioData(await response.arrayBuffer());
+        if (!cancelled) {
+          restWarnBufferRef.current = decoded;
+        }
+      } catch {
+        // Best-effort — the rest-phase warning is non-fatal.
+      }
+    })();
+
+    void (async () => {
+      try {
         const response = await fetch(`${base}sounds/complete_training.mp3`);
         const decoded = await ctx.decodeAudioData(await response.arrayBuffer());
         if (!cancelled) {
@@ -189,6 +202,7 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
       ctxRef.current = null;
       tickBufferRef.current = null;
       warnBufferRef.current = null;
+      restWarnBufferRef.current = null;
       completeBufferRef.current = null;
       gongCacheRef.current.clear();
       keepAliveElRef.current = null;
@@ -304,8 +318,9 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
     const now = Date.now();
     const cues = getTimelineRef.current();
     const completeBuffer = completeBufferRef.current;
-    // The 30s warning falls back to the gong sample if its own clip is missing.
+    // The 30s warnings fall back to the gong sample if their own clip is missing.
     const warnBuffer = warnBufferRef.current ?? gongBuffer;
+    const restWarnBuffer = restWarnBufferRef.current ?? gongBuffer;
 
     cues.forEach((cue) => {
       const offsetSec = (cue.atMs - now) / 1000;
@@ -319,9 +334,11 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
           ? gongBuffer
           : cue.kind === 'warn'
             ? warnBuffer
-            : cue.kind === 'complete'
-              ? completeBuffer
-              : tickBuffer;
+            : cue.kind === 'restWarn'
+              ? restWarnBuffer
+              : cue.kind === 'complete'
+                ? completeBuffer
+                : tickBuffer;
       if (!buffer) {
         return;
       }
