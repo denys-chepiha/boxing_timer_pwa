@@ -320,10 +320,11 @@ export type AudioCue = {
   /**
    * - `gong`: phase start (work / rest)
    * - `warn`: a single warning ~`warnSeconds` before a work round ends
+   * - `restWarn`: a single warning ~`warnSeconds` before a rest phase ends
    * - `tick`: one of the final whole-second countdown beats
    * - `complete`: the session-finished melody
    */
-  kind: 'gong' | 'warn' | 'tick' | 'complete';
+  kind: 'gong' | 'warn' | 'restWarn' | 'tick' | 'complete';
 };
 
 /** Jumps straight to the start of a given (1-based) round, going through prep. */
@@ -394,10 +395,11 @@ export const buildAudioTimeline = (
 
     if ((snap.phase === 'work' || snap.phase === 'rest') && dur > 0) {
       cues.push({ atMs: cursor, kind: 'gong' });
-      // A single warning beat ~`warnSeconds` before a work round ends, but only
-      // when it lands clear of the final countdown window.
-      if (snap.phase === 'work' && dur > warnSeconds && warnSeconds > lastSeconds) {
-        cues.push({ atMs: cursor + (dur - warnSeconds) * 1000, kind: 'warn' });
+      // A single warning beat ~`warnSeconds` before a work/rest phase ends, but
+      // only when it lands clear of the final countdown window.
+      if (dur > warnSeconds && warnSeconds > lastSeconds) {
+        const kind = snap.phase === 'work' ? 'warn' : 'restWarn';
+        cues.push({ atMs: cursor + (dur - warnSeconds) * 1000, kind });
       }
       const maxMark = Math.min(lastSeconds, Math.floor(dur));
       for (let mark = maxMark; mark >= 1; mark -= 1) {
