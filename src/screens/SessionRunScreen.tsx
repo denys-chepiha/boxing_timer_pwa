@@ -11,7 +11,6 @@ import { TimerDisplay } from '@/components/TimerDisplay';
 
 // Hooks
 import { useKeepAwake } from '@/hooks/useKeepAwake';
-import { useMediaSession } from '@/hooks/useMediaSession';
 import { useRunAudio } from '@/hooks/useRunAudio';
 import { useTimerEngine } from '@/hooks/useTimerEngine';
 
@@ -177,38 +176,6 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
       keepAwakeEnabled &&
       (engine.status === 'running' || engine.status === 'paused'),
   );
-
-  useMediaSession({
-    enabled: isFocused && !!session,
-    title: session?.name ?? 'Box Timer',
-    phase: engine.phase,
-    status: engine.status,
-    currentRound: engine.currentRound,
-    totalRounds: rounds.length,
-    remainingSeconds: engine.remainingSeconds,
-    phaseDurationSeconds: engine.phaseDurationSeconds,
-    canSkip:
-      (engine.status === 'running' || engine.status === 'paused') &&
-      (engine.phase === 'work' || engine.phase === 'rest'),
-    onPlay: () => {
-      if (engine.status === 'paused') {
-        engine.resume();
-      } else if (engine.status === 'finished') {
-        engine.repeat();
-      } else if (engine.status === 'idle') {
-        engine.start();
-      }
-    },
-    onPause: engine.pause,
-    onStop: engine.reset,
-    onSkip: () => {
-      if (engine.phase === 'work') {
-        engine.skipRound();
-      } else if (engine.phase === 'rest') {
-        engine.skipRest();
-      }
-    },
-  });
 
   const isCriticalCountdown =
     engine.status === 'running' &&
