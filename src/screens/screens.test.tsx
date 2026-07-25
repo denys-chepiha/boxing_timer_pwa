@@ -306,6 +306,39 @@ describe('SettingsScreen', () => {
     expect(stored.keepScreenAwake).toBe(true);
     expect(stored.prepSeconds).toBe(5);
   });
+
+  it('shows an empty state, then adds and removes a boxer from the roster', async () => {
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SettingsScreen {...settingsProps(nav)} />);
+
+    expect(screen.getByText('No boxers saved yet.')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('New boxer name'), 'Denys');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    expect(screen.getByText('Denys')).toBeInTheDocument();
+    expect(await rosterStorage.getAll()).toEqual(['Denys']);
+    // The input clears, ready for the next name.
+    expect(screen.getByLabelText('New boxer name')).toHaveValue('');
+
+    await user.click(screen.getByRole('button', { name: 'Remove Denys' }));
+    expect(screen.queryByText('Denys')).not.toBeInTheDocument();
+    expect(await rosterStorage.getAll()).toEqual([]);
+  });
+
+  it('loads the existing roster and ignores adding a blank name', async () => {
+    await rosterStorage.addMany(['Denys', 'Vlad']);
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SettingsScreen {...settingsProps(nav)} />);
+
+    await waitFor(() => expect(screen.getByText('Denys')).toBeInTheDocument());
+    expect(screen.getByText('Vlad')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await rosterStorage.getAll()).toEqual(['Denys', 'Vlad']);
+  });
 });
 
 describe('SessionRunScreen', () => {

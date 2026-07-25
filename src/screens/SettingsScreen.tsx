@@ -16,6 +16,7 @@ import { soundOptions, useSound } from '@/hooks/useSound';
 import { ScreenProps } from '@/navigation/RootNavigator';
 
 // Storage
+import { rosterStorage } from '@/storage/rosterStorage';
 import { defaultSettings, settingsStorage } from '@/storage/settingsStorage';
 
 // Theme
@@ -26,6 +27,8 @@ import { ThemeMode } from '@/types/models';
 
 // Utils
 import { notify } from '@/utils/dialog';
+// Consts
+import { plainTextInputProps } from '@/consts/forms';
 
 const themeOptions: { label: string; value: ThemeMode }[] = [
   { label: 'System', value: 'system' },
@@ -46,6 +49,8 @@ export const SettingsScreen = ({ navigation }: ScreenProps<'Settings'>) => {
   const [defaultSoundId, setDefaultSoundId] = useState(defaultSettings.defaultSoundId);
   const [keepScreenAwake, setKeepScreenAwake] = useState(defaultSettings.keepScreenAwake);
   const [prepSeconds, setPrepSeconds] = useState(defaultSettings.prepSeconds);
+  const [roster, setRoster] = useState<string[]>([]);
+  const [newBoxerName, setNewBoxerName] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -66,6 +71,38 @@ export const SettingsScreen = ({ navigation }: ScreenProps<'Settings'>) => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadRoster = async () => {
+      const names = await rosterStorage.getAll();
+      if (mounted) {
+        setRoster(names);
+      }
+    };
+
+    void loadRoster();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const addBoxer = async () => {
+    const trimmed = newBoxerName.trim();
+    if (!trimmed) {
+      return;
+    }
+    const next = await rosterStorage.add(trimmed);
+    setRoster(next);
+    setNewBoxerName('');
+  };
+
+  const removeBoxer = async (nameToRemove: string) => {
+    const next = await rosterStorage.remove(nameToRemove);
+    setRoster(next);
+  };
 
   const save = async () => {
     if (prepSeconds < 0) {
@@ -161,6 +198,99 @@ export const SettingsScreen = ({ navigation }: ScreenProps<'Settings'>) => {
           options={soundSegmentOptions}
           maxPerRow={3}
         />
+      </div>
+
+      <div style={sectionStyle}>
+        <div>
+          <span style={labelStyle}>Boxers</span>
+          <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
+            Saved athletes you can pick from when naming rounds in a workout.
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            {...plainTextInputProps}
+            type="text"
+            enterKeyHint="done"
+            aria-label="New boxer name"
+            value={newBoxerName}
+            onChange={(event) => setNewBoxerName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void addBoxer();
+              }
+            }}
+            placeholder="Add a boxer"
+            style={{
+              flex: 1,
+              height: 48,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.input,
+              borderRadius: 8,
+              padding: '0 14px',
+              fontSize: 15,
+              fontWeight: 800,
+              color: theme.colors.text,
+            }}
+          />
+          <PrimaryButton label="Add" onPress={() => void addBoxer()} />
+        </div>
+
+        {roster.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {roster.map((boxerName) => (
+              <div
+                key={boxerName}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: theme.colors.border,
+                  backgroundColor: theme.colors.surface,
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                }}
+              >
+                <span style={{ fontSize: 15, fontWeight: 800, color: theme.colors.text }}>{boxerName}</span>
+                <button
+                  type="button"
+                  onClick={() => void removeBoxer(boxerName)}
+                  aria-label={`Remove ${boxerName}`}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'transparent',
+                    color: theme.colors.textMuted,
+                    fontSize: 16,
+                    fontWeight: 900,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '8px 0',
+              fontSize: 14,
+              fontWeight: 700,
+              color: theme.colors.textMuted,
+            }}
+          >
+            No boxers saved yet.
+          </div>
+        )}
       </div>
 
       <div style={sectionStyle}>
