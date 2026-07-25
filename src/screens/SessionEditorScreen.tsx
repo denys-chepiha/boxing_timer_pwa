@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSessions } from '@/app/SessionsProvider';
 
 // Components
+import { NameCombobox } from '@/components/NameCombobox';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { TimeWheelField } from '@/components/TimeWheelField';
@@ -16,15 +17,17 @@ import { soundOptions, useSound } from '@/hooks/useSound';
 import { ScreenProps } from '@/navigation/RootNavigator';
 
 // Storage
+import { rosterStorage } from '@/storage/rosterStorage';
 import { settingsStorage } from '@/storage/settingsStorage';
 
 // Theme
 import { useTheme } from '@/theme/ThemeProvider';
 
 // Types
-import { RoundConfig, SessionCategory, SoundId } from '@/types/models';
+import { Participant, RoundConfig, SessionCategory, SoundId } from '@/types/models';
 
 // Utils
+import { createId } from '@/utils/id';
 import { notify } from '@/utils/dialog';
 import { resolveRounds, sumRounds } from '@/utils/rounds';
 import { formatSecondsToClock } from '@/utils/timeFormat';
@@ -32,6 +35,12 @@ import { formatSecondsToClock } from '@/utils/timeFormat';
 import { plainTextInputProps } from '@/consts/forms';
 
 type TimingMode = 'uniform' | 'custom';
+
+/** A participant is "customized" once any of its round overrides has a value. */
+const isCustomized = (participant: Participant): boolean =>
+  participant.workSeconds !== undefined ||
+  participant.restSeconds !== undefined ||
+  participant.description !== undefined;
 
 const categoryOptions: { label: string; value: SessionCategory }[] = [
   { label: 'Boxing', value: 'boxing' },
@@ -78,6 +87,11 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
           restSeconds: current?.restSeconds ?? 60,
         }),
   );
+  const [description, setDescription] = useState(current?.description ?? '');
+  const [participants, setParticipants] = useState<Participant[]>(
+    () => current?.participants?.map((participant) => ({ ...participant, names: [...participant.names] })) ?? [],
+  );
+  const [roster, setRoster] = useState<string[]>([]);
 
   useEffect(() => {
     if (current) {
@@ -101,7 +115,95 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
     };
   }, [current]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    const loadRoster = async () => {
+      const names = await rosterStorage.getAll();
+      if (mounted) {
+        setRoster(names);
+      }
+    };
+
+    void loadRoster();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const totals = useMemo(() => sumRounds(roundList), [roundList]);
+
+  const addParticipant = () => {
+    setParticipants((list) => [...list, { id: createId(), names: [''] }]);
+  };
+
+  const removeParticipant = (id: string) => {
+    setParticipants((list) => list.filter((participant) => participant.id !== id));
+  };
+
+  const moveParticipant = (index: number, direction: -1 | 1) => {
+    setParticipants((list) => {
+      const target = index + direction;
+      if (target < 0 || target >= list.length) {
+        return list;
+      }
+      const next = [...list];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
+
+  const updateParticipant = (id: string, patch: Partial<Participant>) => {
+    setParticipants((list) =>
+      list.map((participant) => (participant.id === id ? { ...participant, ...patch } : participant)),
+    );
+  };
+
+  const updateParticipantName = (id: string, nameIndex: number, value: string) => {
+    setParticipants((list) =>
+      list.map((participant) =>
+        participant.id === id
+          ? { ...participant, names: participant.names.map((name, i) => (i === nameIndex ? value : name)) }
+          : participant,
+      ),
+    );
+  };
+
+  const addNameToParticipant = (id: string) => {
+    setParticipants((list) =>
+      list.map((participant) =>
+        participant.id === id ? { ...participant, names: [...participant.names, ''] } : participant,
+      ),
+    );
+  };
+
+  const removeNameFromParticipant = (id: string, nameIndex: number) => {
+    setParticipants((list) =>
+      list.map((participant) =>
+        participant.id === id && participant.names.length > 1
+          ? { ...participant, names: participant.names.filter((_, i) => i !== nameIndex) }
+          : participant,
+      ),
+    );
+  };
+
+  const toggleCustomize = (participant: Participant) => {
+    if (isCustomized(participant)) {
+      updateParticipant(participant.id, {
+        workSeconds: undefined,
+        restSeconds: undefined,
+        description: undefined,
+      });
+    } else {
+      updateParticipant(participant.id, { workSeconds, restSeconds });
+    }
+  };
+
+  const handleRemoveFromRoster = async (nameToRemove: string) => {
+    const next = await rosterStorage.remove(nameToRemove);
+    setRoster(next);
+  };
 
   const handleModeChange = (next: TimingMode) => {
     if (next === mode) {
@@ -142,6 +244,43 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
       return;
     }
 
+    const trimmedDescription = description.trim() || undefined;
+
+    if (participants.length > 0) {
+      const cleanedParticipants = participants.map((participant) => ({
+        ...participant,
+        names: participant.names.map((n) => n.trim()).filter(Boolean),
+      }));
+
+      if (cleanedParticipants.some((participant) => participant.names.length === 0)) {
+        notify('Every person needs a name');
+        return;
+      }
+
+      const draft = {
+        name: name.trim(),
+        category,
+        rounds: cleanedParticipants.length,
+        workSeconds,
+        restSeconds,
+        roundsConfig: undefined,
+        description: trimmedDescription,
+        participants: cleanedParticipants,
+        soundId,
+      };
+
+      if (!current) {
+        await createSession(draft);
+      } else {
+        await updateSession(current.id, draft);
+      }
+
+      await rosterStorage.addMany(cleanedParticipants.flatMap((participant) => participant.names));
+
+      navigation.goBack();
+      return;
+    }
+
     if (mode === 'custom') {
       if (roundList.length < 1) {
         notify('Add at least one round');
@@ -159,6 +298,8 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
         workSeconds: roundList[0].workSeconds,
         restSeconds: roundList[0].restSeconds,
         roundsConfig: roundList,
+        description: trimmedDescription,
+        participants: undefined,
         soundId,
       };
 
@@ -184,6 +325,8 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
       workSeconds,
       restSeconds,
       roundsConfig: undefined,
+      description: trimmedDescription,
+      participants: undefined,
       soundId,
     };
 
@@ -229,6 +372,19 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
     backgroundColor: theme.colors.surfaceStrong,
     color: theme.colors.text,
   } as const;
+
+  const roundGhostButtonStyle = {
+    minWidth: 32,
+    height: 32,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: 'solid' as const,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.card,
+    color: theme.colors.textMuted,
+    fontSize: 15,
+    fontWeight: 900,
+  };
 
   return (
     <div
@@ -306,15 +462,221 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
 
       <div style={sectionStyle}>
         <div>
-          <span style={labelStyle}>Round timing</span>
+          <span style={labelStyle}>Description</span>
           <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
-            Use one interval for every round, or set each round and rest individually.
+            Shown under the timer while this workout runs.
           </div>
         </div>
-        <SegmentedControl value={mode} onChange={handleModeChange} options={timingModeOptions} maxPerRow={2} />
+        <textarea
+          {...plainTextInputProps}
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          placeholder="e.g. Jab-cross-hook combos, light footwork"
+          rows={2}
+          style={{
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.input,
+            borderRadius: 8,
+            padding: '10px 14px',
+            fontSize: 15,
+            fontWeight: 700,
+            fontFamily: 'inherit',
+            color: theme.colors.text,
+            resize: 'vertical',
+          }}
+        />
       </div>
 
-      {mode === 'uniform' ? (
+      <div style={sectionStyle}>
+        <div>
+          <span style={labelStyle}>Who's training ({participants.length})</span>
+          <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
+            Add boxers to name each round. Add more than one name to a round for pair or group
+            training under one clock.
+          </div>
+        </div>
+
+        {participants.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {participants.map((participant, index) => {
+              const customized = isCustomized(participant);
+              return (
+                <div
+                  key={participant.id}
+                  style={{
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: theme.colors.border,
+                    backgroundColor: theme.colors.surface,
+                    borderRadius: 8,
+                    padding: 12,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <span style={{ fontSize: 15, fontWeight: 900, letterSpacing: 0.6, color: theme.colors.text }}>
+                      ROUND {index + 1}
+                    </span>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => moveParticipant(index, -1)}
+                        disabled={index === 0}
+                        aria-label={`Move person ${index + 1} up`}
+                        style={{ ...roundGhostButtonStyle, opacity: index === 0 ? 0.4 : 1 }}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveParticipant(index, 1)}
+                        disabled={index === participants.length - 1}
+                        aria-label={`Move person ${index + 1} down`}
+                        style={{
+                          ...roundGhostButtonStyle,
+                          opacity: index === participants.length - 1 ? 0.4 : 1,
+                        }}
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeParticipant(participant.id)}
+                        aria-label={`Remove person ${index + 1}`}
+                        style={roundGhostButtonStyle}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {participant.names.map((personName, nameIndex) => (
+                      <div key={nameIndex} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <NameCombobox
+                          value={personName}
+                          onChange={(next) => updateParticipantName(participant.id, nameIndex, next)}
+                          suggestions={roster}
+                          onRemoveSuggestion={handleRemoveFromRoster}
+                          placeholder={nameIndex === 0 ? 'Name' : 'Partner name'}
+                          ariaLabel={`Name ${nameIndex + 1} for round ${index + 1}`}
+                        />
+                        {participant.names.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => removeNameFromParticipant(participant.id, nameIndex)}
+                            aria-label={`Remove name ${nameIndex + 1} from round ${index + 1}`}
+                            style={roundGhostButtonStyle}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </div>
+                    ))}
+                    <PrimaryButton
+                      label="+ Add partner"
+                      variant="secondary"
+                      size="sm"
+                      onPress={() => addNameToParticipant(participant.id)}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => toggleCustomize(participant)}
+                    style={{
+                      alignSelf: 'flex-start',
+                      fontSize: 13,
+                      fontWeight: 800,
+                      color: theme.colors.primary,
+                      background: 'transparent',
+                      border: 'none',
+                    }}
+                  >
+                    {customized ? 'Using custom timing/description' : 'Customize timing & description'}
+                  </button>
+
+                  {customized ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                        <TimeWheelField
+                          label="WORK"
+                          valueSeconds={participant.workSeconds ?? workSeconds}
+                          onChange={(value) => updateParticipant(participant.id, { workSeconds: value })}
+                          minSeconds={1}
+                        />
+                        <TimeWheelField
+                          label="REST"
+                          valueSeconds={participant.restSeconds ?? restSeconds}
+                          onChange={(value) => updateParticipant(participant.id, { restSeconds: value })}
+                          minSeconds={0}
+                        />
+                      </div>
+                      <input
+                        {...plainTextInputProps}
+                        type="text"
+                        enterKeyHint="done"
+                        aria-label={`Description for round ${index + 1}`}
+                        value={participant.description ?? ''}
+                        onChange={(event) =>
+                          updateParticipant(participant.id, { description: event.target.value })
+                        }
+                        placeholder={description || 'What to do this round'}
+                        style={{
+                          height: 48,
+                          borderWidth: 1,
+                          borderStyle: 'solid',
+                          borderColor: theme.colors.border,
+                          backgroundColor: theme.colors.input,
+                          borderRadius: 8,
+                          padding: '0 14px',
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: theme.colors.text,
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
+        <PrimaryButton label="+ Add person" variant="secondary" onPress={addParticipant} />
+      </div>
+
+      {participants.length === 0 ? (
+        <div style={sectionStyle}>
+          <div>
+            <span style={labelStyle}>Round timing</span>
+            <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
+              Use one interval for every round, or set each round and rest individually.
+            </div>
+          </div>
+          <SegmentedControl value={mode} onChange={handleModeChange} options={timingModeOptions} maxPerRow={2} />
+        </div>
+      ) : (
+        <div style={sectionStyle}>
+          <div>
+            <span style={labelStyle}>Default timing</span>
+            <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
+              Each person uses this unless customized above. Rounds: {participants.length} — one per
+              person.
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+            <TimeWheelField label="WORK" valueSeconds={workSeconds} onChange={setWorkSeconds} minSeconds={1} />
+            <TimeWheelField label="REST" valueSeconds={restSeconds} onChange={setRestSeconds} minSeconds={1} />
+          </div>
+        </div>
+      )}
+
+      {participants.length === 0 && mode === 'uniform' ? (
         <>
           <div
             style={{
@@ -368,7 +730,9 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
             </div>
           </div>
         </>
-      ) : (
+      ) : null}
+
+      {participants.length === 0 && mode === 'custom' ? (
         <div style={sectionStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
             <span style={labelStyle}>Rounds ({roundList.length})</span>
@@ -448,7 +812,7 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
 
           <PrimaryButton label="+ Add round" variant="secondary" onPress={addRound} />
         </div>
-      )}
+      ) : null}
 
       <div style={sectionStyle}>
         <span style={labelStyle}>Alert Sound</span>
