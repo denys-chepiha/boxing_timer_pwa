@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSessions } from '@/app/SessionsProvider';
 
 // Components
-import { NameCombobox } from '@/components/NameCombobox';
+import { NamePickerField } from '@/components/NamePickerField';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { TimeWheelField } from '@/components/TimeWheelField';
@@ -224,9 +224,24 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
     }
   };
 
-  const handleRemoveFromRoster = async (nameToRemove: string) => {
-    const next = await rosterStorage.remove(nameToRemove);
-    setRoster(next);
+  // Every name already picked anywhere in this session, so the same boxer
+  // can't be assigned to two rounds (or twice in one pair) by mistake.
+  const usedNames = useMemo(() => {
+    const set = new Set<string>();
+    participants.forEach((participant) => {
+      participant.entrants.forEach((entrant) => {
+        const trimmed = entrant.name.trim();
+        if (trimmed) {
+          set.add(trimmed.toLowerCase());
+        }
+      });
+    });
+    return set;
+  }, [participants]);
+
+  const rosterOptionsFor = (currentName: string) => {
+    const currentKey = currentName.trim().toLowerCase();
+    return roster.filter((savedName) => savedName.toLowerCase() === currentKey || !usedNames.has(savedName.toLowerCase()));
   };
 
   const handleModeChange = (next: TimingMode) => {
@@ -300,10 +315,6 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
       } else {
         await updateSession(current.id, draft);
       }
-
-      await rosterStorage.addMany(
-        cleanedParticipants.flatMap((participant) => participant.entrants.map((entrant) => entrant.name)),
-      );
 
       navigation.goBack();
       return;
@@ -521,8 +532,8 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
         <div>
           <span style={labelStyle}>Who's training ({participants.length})</span>
           <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
-            Add boxers to name each round. Add more than one name to a round for pair or group
-            training under one clock.
+            Pick saved boxers to name each round. Add more than one to a round for pair or group
+            training under one clock. Manage the roster in Settings.
           </div>
         </div>
 
@@ -586,12 +597,12 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
                     {participant.entrants.map((entrant, entrantIndex) => (
                       <div key={entrantIndex} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <NameCombobox
+                          <NamePickerField
                             value={entrant.name}
-                            onChange={(next) => updateEntrantName(participant.id, entrantIndex, next)}
-                            suggestions={roster}
-                            onRemoveSuggestion={handleRemoveFromRoster}
-                            placeholder={entrantIndex === 0 ? 'Name' : 'Partner name'}
+                            options={rosterOptionsFor(entrant.name)}
+                            onSelect={(next) => updateEntrantName(participant.id, entrantIndex, next)}
+                            onManageRoster={() => navigation.navigate('Settings')}
+                            placeholder={entrantIndex === 0 ? 'Select name' : 'Select partner'}
                             ariaLabel={`Name ${entrantIndex + 1} for round ${index + 1}`}
                           />
                           {participant.entrants.length > 1 ? (

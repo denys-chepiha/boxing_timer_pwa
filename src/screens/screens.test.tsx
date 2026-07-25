@@ -103,19 +103,26 @@ describe('SessionEditorScreen', () => {
     expect(saved.participants).toBeUndefined();
   });
 
+  // Names are picked from the saved roster (managed in Settings), not typed.
+  const pickName = async (user: ReturnType<typeof userEvent.setup>, fieldLabel: string, name: string) => {
+    await user.click(screen.getByLabelText(fieldLabel));
+    await user.click(screen.getByRole('option', { name }));
+  };
+
   it('adds named participants, one round per person, replacing round-count controls', async () => {
+    await rosterStorage.addMany(['Denys', 'Vlad']);
     const user = userEvent.setup();
     const nav = fakeNav();
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
     await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Group Circuit');
     await user.click(screen.getByRole('button', { name: '+ Add person' }));
-    await user.type(screen.getByLabelText('Name 1 for round 1'), 'Denys');
+    await pickName(user, 'Name 1 for round 1', 'Denys');
     expect(screen.getByText("Who's training (1)")).toBeInTheDocument();
     expect(screen.queryByText('Round timing')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '+ Add person' }));
-    await user.type(screen.getByLabelText('Name 1 for round 2'), 'Vlad');
+    await pickName(user, 'Name 1 for round 2', 'Vlad');
     expect(screen.getByText(/Rounds: 2/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -128,20 +135,34 @@ describe('SessionEditorScreen', () => {
       { id: expect.any(String), entrants: [{ name: 'Denys' }] },
       { id: expect.any(String), entrants: [{ name: 'Vlad' }] },
     ]);
-    // Both names are registered for the roster picker on future workouts.
-    expect(await rosterStorage.getAll()).toEqual(['Denys', 'Vlad']);
+  });
+
+  it('excludes a name already used elsewhere in this session from the picker', async () => {
+    await rosterStorage.addMany(['Denys', 'Vlad']);
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await pickName(user, 'Name 1 for round 1', 'Denys');
+    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+
+    await user.click(screen.getByLabelText('Name 1 for round 2'));
+    expect(screen.getByRole('option', { name: 'Vlad' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Denys' })).not.toBeInTheDocument();
   });
 
   it('adds a second name to a round for pair training under one clock', async () => {
+    await rosterStorage.addMany(['Denys', 'Vlad']);
     const user = userEvent.setup();
     const nav = fakeNav();
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
     await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Pairs');
     await user.click(screen.getByRole('button', { name: '+ Add person' }));
-    await user.type(screen.getByLabelText('Name 1 for round 1'), 'Denys');
+    await pickName(user, 'Name 1 for round 1', 'Denys');
     await user.click(screen.getByRole('button', { name: '+ Add partner' }));
-    await user.type(screen.getByLabelText('Name 2 for round 1'), 'Vlad');
+    await pickName(user, 'Name 2 for round 1', 'Vlad');
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
@@ -154,15 +175,16 @@ describe('SessionEditorScreen', () => {
   });
 
   it('lets one partner in a pair have their own note, while the other keeps the round default', async () => {
+    await rosterStorage.addMany(['Denys', 'Vlad']);
     const user = userEvent.setup();
     const nav = fakeNav();
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
     await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Pairs with notes');
     await user.click(screen.getByRole('button', { name: '+ Add person' }));
-    await user.type(screen.getByLabelText('Name 1 for round 1'), 'Denys');
+    await pickName(user, 'Name 1 for round 1', 'Denys');
     await user.click(screen.getByRole('button', { name: '+ Add partner' }));
-    await user.type(screen.getByLabelText('Name 2 for round 1'), 'Vlad');
+    await pickName(user, 'Name 2 for round 1', 'Vlad');
 
     // A per-partner note field only appears once a round has 2+ people.
     await user.type(screen.getByLabelText('Note for Vlad in round 1'), '1-2');
@@ -180,13 +202,14 @@ describe('SessionEditorScreen', () => {
   });
 
   it('lets a participant override timing and description, inheriting session defaults otherwise', async () => {
+    await rosterStorage.add('Denys');
     const user = userEvent.setup();
     const nav = fakeNav();
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
     await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Overrides');
     await user.click(screen.getByRole('button', { name: '+ Add person' }));
-    await user.type(screen.getByLabelText('Name 1 for round 1'), 'Denys');
+    await pickName(user, 'Name 1 for round 1', 'Denys');
     await user.click(screen.getByRole('button', { name: 'Customize timing & description' }));
     await user.type(screen.getByLabelText('Description for round 1'), 'Mitts');
 
@@ -205,6 +228,18 @@ describe('SessionEditorScreen', () => {
         description: 'Mitts',
       },
     ]);
+  });
+
+  it('offers a shortcut to Settings from the picker when the roster has no options left', async () => {
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.click(screen.getByLabelText('Name 1 for round 1'));
+    await user.click(screen.getByRole('button', { name: 'Manage in Settings' }));
+
+    expect(nav.navigate).toHaveBeenCalledWith('Settings');
   });
 
   it('blocks saving when a participant is left without a name', async () => {

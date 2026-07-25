@@ -3,7 +3,7 @@ import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 // Components
-import { NameCombobox } from '@/components/NameCombobox';
+import { NamePickerField } from '@/components/NamePickerField';
 import { NumberField } from '@/components/NumberField';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ROUND_EVEN_COLOR, ROUND_ODD_COLOR, RoundTiles, roundColor } from '@/components/RoundTiles';
@@ -61,70 +61,40 @@ describe('NumberField', () => {
   });
 });
 
-describe('NameCombobox', () => {
-  it('reports typed input to onChange', () => {
-    const onChange = vi.fn();
-    renderWithTheme(<NameCombobox value="" onChange={onChange} suggestions={[]} ariaLabel="Name" />);
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Den' } });
-    expect(onChange).toHaveBeenCalledWith('Den');
-  });
-
-  it('shows every saved name on focus', async () => {
+describe('NamePickerField', () => {
+  it('shows a placeholder until a name is picked, then the picked name', async () => {
     const user = userEvent.setup();
+    const onSelect = vi.fn();
     renderWithTheme(
-      <NameCombobox value="" onChange={vi.fn()} suggestions={['Denys', 'Vlad', 'Piter']} ariaLabel="Name" />,
+      <NamePickerField value="" options={['Denys', 'Vlad']} onSelect={onSelect} ariaLabel="Name" />,
     );
-    await user.click(screen.getByLabelText('Name'));
-    expect(screen.getByRole('option', { name: 'Denys' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Vlad' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Piter' })).toBeInTheDocument();
-  });
+    expect(screen.getByText('Select name')).toBeInTheDocument();
 
-  it('filters suggestions down to those matching the current value', async () => {
-    const user = userEvent.setup();
-    renderWithTheme(
-      <NameCombobox value="de" onChange={vi.fn()} suggestions={['Denys', 'Vlad', 'Piter']} ariaLabel="Name" />,
-    );
-    await user.click(screen.getByLabelText('Name'));
-    expect(screen.getByRole('option', { name: 'Denys' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Vlad' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Piter' })).not.toBeInTheDocument();
-  });
-
-  it('selects a suggestion and closes the dropdown', async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderWithTheme(<NameCombobox value="" onChange={onChange} suggestions={['Denys']} ariaLabel="Name" />);
     await user.click(screen.getByLabelText('Name'));
     await user.click(screen.getByRole('option', { name: 'Denys' }));
-    expect(onChange).toHaveBeenCalledWith('Denys');
+    expect(onSelect).toHaveBeenCalledWith('Denys');
+  });
+
+  it('only offers the options passed in (already-used names excluded by the caller)', async () => {
+    const user = userEvent.setup();
+    renderWithTheme(
+      <NamePickerField value="" options={['Piter']} onSelect={vi.fn()} ariaLabel="Name" />,
+    );
+    await user.click(screen.getByLabelText('Name'));
+    expect(screen.getByRole('option', { name: 'Piter' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Denys' })).not.toBeInTheDocument();
   });
 
-  it('removes a saved name via its suggestion row', async () => {
+  it('offers a way to manage the roster when there are no options left', async () => {
     const user = userEvent.setup();
-    const onRemoveSuggestion = vi.fn();
+    const onManageRoster = vi.fn();
     renderWithTheme(
-      <NameCombobox
-        value=""
-        onChange={vi.fn()}
-        suggestions={['Denys']}
-        onRemoveSuggestion={onRemoveSuggestion}
-        ariaLabel="Name"
-      />,
+      <NamePickerField value="" options={[]} onSelect={vi.fn()} ariaLabel="Name" onManageRoster={onManageRoster} />,
     );
     await user.click(screen.getByLabelText('Name'));
-    await user.click(screen.getByRole('button', { name: 'Remove Denys from saved names' }));
-    expect(onRemoveSuggestion).toHaveBeenCalledWith('Denys');
-  });
-
-  it('keeps the field free of iOS autofill/autocorrect interference', () => {
-    renderWithTheme(<NameCombobox value="" onChange={vi.fn()} suggestions={[]} ariaLabel="Name" />);
-    const input = screen.getByLabelText('Name');
-    expect(input).toHaveAttribute('autocomplete', 'off');
-    expect(input).toHaveAttribute('autocorrect', 'off');
-    expect(input).toHaveAttribute('autocapitalize', 'off');
-    expect(input).toHaveAttribute('spellcheck', 'false');
+    expect(screen.getByText(/No saved boxers left/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Manage in Settings' }));
+    expect(onManageRoster).toHaveBeenCalledOnce();
   });
 });
 
