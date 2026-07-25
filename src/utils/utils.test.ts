@@ -120,6 +120,63 @@ describe('resolveRounds', () => {
   it('always yields at least one round', () => {
     expect(resolveRounds({ rounds: 0, workSeconds: 5, restSeconds: 2 })).toHaveLength(1);
   });
+
+  it('carries the session description onto every round when set', () => {
+    const rounds = resolveRounds({
+      rounds: 2,
+      workSeconds: 60,
+      restSeconds: 30,
+      description: 'Jab-cross combos',
+    });
+    expect(rounds.every((round) => round.description === 'Jab-cross combos')).toBe(true);
+  });
+
+  it('resolves one round per participant, labelled by name, overriding rounds/roundsConfig', () => {
+    const rounds = resolveRounds({
+      rounds: 99,
+      workSeconds: 180,
+      restSeconds: 60,
+      description: 'Default drill',
+      roundsConfig: [{ workSeconds: 1, restSeconds: 1 }],
+      participants: [
+        { id: 'p1', names: ['Denys'] },
+        { id: 'p2', names: ['Vlad'] },
+        { id: 'p3', names: ['Piter'] },
+      ],
+    });
+    expect(rounds).toEqual([
+      { workSeconds: 180, restSeconds: 60, label: 'Denys', description: 'Default drill' },
+      { workSeconds: 180, restSeconds: 60, label: 'Vlad', description: 'Default drill' },
+      { workSeconds: 180, restSeconds: 0, label: 'Piter', description: 'Default drill' },
+    ]);
+  });
+
+  it('lets a participant override work/rest/description, falling back to session defaults', () => {
+    const rounds = resolveRounds({
+      rounds: 1,
+      workSeconds: 180,
+      restSeconds: 60,
+      description: 'Default drill',
+      participants: [
+        { id: 'p1', names: ['Denys'], workSeconds: 120, restSeconds: 45, description: 'Mitts' },
+        { id: 'p2', names: ['Vlad'] },
+      ],
+    });
+    expect(rounds).toEqual([
+      { workSeconds: 120, restSeconds: 45, label: 'Denys', description: 'Mitts' },
+      { workSeconds: 180, restSeconds: 0, label: 'Vlad', description: 'Default drill' },
+    ]);
+  });
+
+  it('labels a pair round by joining every name sharing that round', () => {
+    const rounds = resolveRounds({
+      rounds: 1,
+      workSeconds: 90,
+      restSeconds: 30,
+      participants: [{ id: 'p1', names: ['Denys', 'Vlad'] }],
+    });
+    expect(rounds[0].label).toBe('Denys & Vlad');
+  });
 });
 
 describe('sumRounds', () => {
