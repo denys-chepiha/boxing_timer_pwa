@@ -178,6 +178,18 @@ describe('SessionCard', () => {
     renderWithTheme(<SessionCard session={session} onPress={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} />);
     expect(screen.getAllByText('Varies').length).toBeGreaterThanOrEqual(1);
   });
+
+  it('summarises named participants, including everyone sharing a pair round', () => {
+    const session = makeSession({
+      rounds: 2,
+      participants: [
+        { id: 'p1', names: ['Denys'] },
+        { id: 'p2', names: ['Vlad', 'Piter'] },
+      ],
+    });
+    renderWithTheme(<SessionCard session={session} onPress={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} />);
+    expect(screen.getByText('Denys, Vlad, Piter')).toBeInTheDocument();
+  });
 });
 
 describe('TimerDisplay', () => {
@@ -244,6 +256,21 @@ describe('RoundTiles', () => {
 
     await userEvent.click(screen.getByText('R2'));
     expect(onSelect).toHaveBeenCalledWith(2);
+  });
+
+  it('shows who a round is for when the session names participants', () => {
+    renderWithTheme(
+      <RoundTiles
+        rounds={[
+          { workSeconds: 120, restSeconds: 30, label: 'Denys' },
+          { workSeconds: 120, restSeconds: 0, label: 'Vlad & Piter' },
+        ]}
+        currentRound={1}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Denys')).toBeInTheDocument();
+    expect(screen.getByText('Vlad & Piter')).toBeInTheDocument();
   });
 
   it('wraps round tiles instead of forcing horizontal overflow', () => {

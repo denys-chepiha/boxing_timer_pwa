@@ -89,8 +89,17 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
         workSeconds: session?.workSeconds ?? 1,
         restSeconds: session?.restSeconds ?? 1,
         roundsConfig: session?.roundsConfig,
+        description: session?.description,
+        participants: session?.participants,
       }),
-    [session?.restSeconds, session?.rounds, session?.workSeconds, session?.roundsConfig],
+    [
+      session?.restSeconds,
+      session?.rounds,
+      session?.workSeconds,
+      session?.roundsConfig,
+      session?.description,
+      session?.participants,
+    ],
   );
 
   const config = useMemo(() => ({ rounds, prepSeconds }), [rounds, prepSeconds]);
@@ -200,6 +209,14 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
     }
     return raw;
   }, [engine.phaseDurationSeconds, engine.remainingSeconds]);
+
+  const currentRoundInfo = useMemo(() => {
+    if (!session || engine.status === 'idle') {
+      return null;
+    }
+    const index = Math.min(engine.currentRound, rounds.length) - 1;
+    return rounds[index] ?? null;
+  }, [engine.currentRound, engine.status, rounds, session]);
 
   const nextPhaseText = useMemo(() => {
     if (!session || engine.status === 'idle' || engine.status === 'finished') return null;
@@ -377,6 +394,35 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
           criticalColor={isRestPhase ? '#2FB874' : '#F05454'}
           restColor="#2FB874"
         />
+        {currentRoundInfo?.label ? (
+          <div
+            className="session-run-round-label"
+            style={{
+              textAlign: 'center',
+              fontSize: 17,
+              fontWeight: 900,
+              letterSpacing: 0.4,
+              color: phaseAccent,
+            }}
+          >
+            {currentRoundInfo.label}
+          </div>
+        ) : null}
+        {currentRoundInfo?.description ? (
+          <div
+            className="session-run-round-description"
+            style={{
+              textAlign: 'center',
+              maxWidth: 388,
+              padding: '0 8px',
+              fontSize: 13,
+              fontWeight: 700,
+              color: theme.colors.textMuted,
+            }}
+          >
+            {currentRoundInfo.description}
+          </div>
+        ) : null}
       </div>
 
       <div
