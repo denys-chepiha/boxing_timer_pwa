@@ -321,6 +321,40 @@ describe('SessionRunScreen', () => {
     expect(currentDescription()).toBe('Mitts');
   });
 
+  it('breaks the description down per entrant when a pair round has different instructions', async () => {
+    await settingsStorage.save({
+      themeMode: 'system',
+      defaultSoundId: 'boxing-gong',
+      keepScreenAwake: false,
+      prepSeconds: 0,
+    });
+    await sessionsStorage.saveAll([
+      makeSession({
+        id: 'r7',
+        name: 'Split pair',
+        rounds: 1,
+        participants: [
+          {
+            id: 'p1',
+            description: '1-1-2',
+            entrants: [{ name: 'Denys' }, { name: 'Vlad', description: '1-2' }],
+          },
+        ],
+      }),
+    ]);
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    const { container } = renderWithProviders(<SessionRunScreen {...runProps(nav, 'r7')} />);
+
+    await waitFor(() => expect(screen.getByText('Split pair')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Start' }));
+
+    const description = container.querySelector('.session-run-round-description');
+    expect(description?.textContent).toBe('Denys: 1-1-2Vlad: 1-2');
+    expect(screen.getByText('1-1-2')).toBeInTheDocument();
+    expect(screen.getByText('1-2')).toBeInTheDocument();
+  });
+
   it('starts, pauses and persists an in-progress run', async () => {
     await sessionsStorage.saveAll([makeSession({ id: 'r1', name: 'Runner' })]);
     const user = userEvent.setup();

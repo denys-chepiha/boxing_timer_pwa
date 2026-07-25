@@ -218,6 +218,27 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
     return rounds[index] ?? null;
   }, [engine.currentRound, engine.status, rounds, session]);
 
+  // One line per distinct instruction for the current round: a single shared
+  // line when everyone has the same (or no override), otherwise one line per
+  // entrant whose description differs from the rest (e.g. one partner drills
+  // 1-1-2 while the other drills 1-2, under the same clock).
+  const roundNotes = useMemo(() => {
+    const entrants = currentRoundInfo?.entrants;
+    if (!entrants || entrants.length === 0) {
+      return currentRoundInfo?.description ? [{ description: currentRoundInfo.description }] : [];
+    }
+
+    const uniqueDescriptions = new Set(entrants.map((entrant) => entrant.description ?? ''));
+    if (uniqueDescriptions.size <= 1) {
+      const shared = entrants[0].description;
+      return shared ? [{ description: shared }] : [];
+    }
+
+    return entrants
+      .filter((entrant): entrant is { name: string; description: string } => !!entrant.description)
+      .map((entrant) => ({ name: entrant.name, description: entrant.description }));
+  }, [currentRoundInfo]);
+
   const nextPhaseText = useMemo(() => {
     if (!session || engine.status === 'idle' || engine.status === 'finished') return null;
     if (engine.phase === 'prep') return null;
@@ -408,19 +429,35 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
             {currentRoundInfo.label}
           </div>
         ) : null}
-        {currentRoundInfo?.description ? (
+        {roundNotes.length > 0 ? (
           <div
             className="session-run-round-description"
             style={{
-              textAlign: 'center',
+              width: '100%',
               maxWidth: 388,
               padding: '0 8px',
-              fontSize: 13,
-              fontWeight: 700,
-              color: theme.colors.textMuted,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 4,
             }}
           >
-            {currentRoundInfo.description}
+            {roundNotes.map((note, index) => (
+              <div
+                key={'name' in note ? note.name : index}
+                style={{
+                  textAlign: 'center',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: theme.colors.textMuted,
+                }}
+              >
+                {'name' in note ? (
+                  <span style={{ fontWeight: 900, color: theme.colors.text }}>{note.name}: </span>
+                ) : null}
+                <span>{note.description}</span>
+              </div>
+            ))}
           </div>
         ) : null}
       </div>
