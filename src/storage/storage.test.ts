@@ -116,8 +116,14 @@ describe('sessionsStorage', () => {
     const session = sampleSession({
       description: 'Heavy bag combos',
       participants: [
-        { id: 'p1', names: ['Denys'], workSeconds: 120, restSeconds: 45, description: 'Mitts' },
-        { id: 'p2', names: ['Vlad', 'Piter'] },
+        {
+          id: 'p1',
+          entrants: [{ name: 'Denys' }],
+          workSeconds: 120,
+          restSeconds: 45,
+          description: 'Mitts',
+        },
+        { id: 'p2', entrants: [{ name: 'Vlad' }, { name: 'Piter', description: '1-2' }] },
       ],
     });
     await sessionsStorage.saveAll([session]);
@@ -130,10 +136,15 @@ describe('sessionsStorage', () => {
       JSON.stringify([
         sampleSession({
           participants: [
-            { id: 'p1', names: ['  Denys  '], workSeconds: 12.9, restSeconds: -4 },
-            { names: [] }, // no names -> dropped
-            { names: ['', '  '] }, // blank names -> dropped
-            { id: 'p2', names: ['Vlad'] },
+            {
+              id: 'p1',
+              entrants: [{ name: '  Denys  ' }, { name: '' }, { description: 'no name' }],
+              workSeconds: 12.9,
+              restSeconds: -4,
+            },
+            { entrants: [] }, // no entrants -> dropped
+            { entrants: ['', '  '] }, // blank entrants -> dropped
+            { id: 'p2', entrants: [{ name: 'Vlad' }] },
             'not-an-object',
           ] as unknown as Session['participants'],
         }),
@@ -141,8 +152,23 @@ describe('sessionsStorage', () => {
     );
     const [loaded] = await sessionsStorage.getAll();
     expect(loaded.participants).toEqual([
-      { id: 'p1', names: ['  Denys  '], workSeconds: 12, restSeconds: 0 },
-      { id: 'p2', names: ['Vlad'] },
+      { id: 'p1', entrants: [{ name: '  Denys  ' }], workSeconds: 12, restSeconds: 0 },
+      { id: 'p2', entrants: [{ name: 'Vlad' }] },
+    ]);
+  });
+
+  it('accepts the legacy names[] shape from earlier builds', async () => {
+    await localStore.setItem(
+      'box_timer_sessions_v1',
+      JSON.stringify([
+        sampleSession({
+          participants: [{ id: 'p1', names: ['Denys', 'Vlad'] }] as unknown as Session['participants'],
+        }),
+      ]),
+    );
+    const [loaded] = await sessionsStorage.getAll();
+    expect(loaded.participants).toEqual([
+      { id: 'p1', entrants: [{ name: 'Denys' }, { name: 'Vlad' }] },
     ]);
   });
 

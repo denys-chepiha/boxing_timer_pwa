@@ -1,15 +1,23 @@
 // Types
-import { Participant, RoundConfig, Session } from '@/types/models';
+import { Entrant, Participant, RoundConfig, Session } from '@/types/models';
 
 type RoundsSource = Pick<
   Session,
   'rounds' | 'workSeconds' | 'restSeconds' | 'roundsConfig' | 'description' | 'participants'
 >;
 
+/** An entrant with its description resolved (entrant override, else the round's, else the session's). */
+export type ResolvedEntrant = {
+  name: string;
+  description?: string;
+};
+
 /** A resolved round, plus who it's for and what to do (when the session names people). */
 export type ResolvedRound = RoundConfig & {
   label?: string;
   description?: string;
+  /** Present when the session names participants — one entry per person sharing this round. */
+  entrants?: ResolvedEntrant[];
 };
 
 const resolveParticipantRounds = (
@@ -17,14 +25,23 @@ const resolveParticipantRounds = (
   session: Pick<RoundsSource, 'workSeconds' | 'restSeconds' | 'description'>,
 ): ResolvedRound[] => {
   const last = participants.length - 1;
-  return participants.map((participant, index) => ({
-    workSeconds: Math.max(1, Math.floor(participant.workSeconds ?? session.workSeconds)),
-    // The final round never has a trailing rest — the session ends on its work.
-    restSeconds:
-      index < last ? Math.max(0, Math.floor(participant.restSeconds ?? session.restSeconds)) : 0,
-    label: participant.names.join(' & '),
-    description: participant.description ?? session.description,
-  }));
+  return participants.map((participant, index) => {
+    const roundDescription = participant.description ?? session.description;
+    const entrants: ResolvedEntrant[] = participant.entrants.map((entrant: Entrant) => ({
+      name: entrant.name,
+      description: entrant.description ?? roundDescription,
+    }));
+
+    return {
+      workSeconds: Math.max(1, Math.floor(participant.workSeconds ?? session.workSeconds)),
+      // The final round never has a trailing rest — the session ends on its work.
+      restSeconds:
+        index < last ? Math.max(0, Math.floor(participant.restSeconds ?? session.restSeconds)) : 0,
+      label: entrants.map((entrant) => entrant.name).join(' & '),
+      description: roundDescription,
+      entrants,
+    };
+  });
 };
 
 /**

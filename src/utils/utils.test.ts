@@ -139,15 +139,33 @@ describe('resolveRounds', () => {
       description: 'Default drill',
       roundsConfig: [{ workSeconds: 1, restSeconds: 1 }],
       participants: [
-        { id: 'p1', names: ['Denys'] },
-        { id: 'p2', names: ['Vlad'] },
-        { id: 'p3', names: ['Piter'] },
+        { id: 'p1', entrants: [{ name: 'Denys' }] },
+        { id: 'p2', entrants: [{ name: 'Vlad' }] },
+        { id: 'p3', entrants: [{ name: 'Piter' }] },
       ],
     });
     expect(rounds).toEqual([
-      { workSeconds: 180, restSeconds: 60, label: 'Denys', description: 'Default drill' },
-      { workSeconds: 180, restSeconds: 60, label: 'Vlad', description: 'Default drill' },
-      { workSeconds: 180, restSeconds: 0, label: 'Piter', description: 'Default drill' },
+      {
+        workSeconds: 180,
+        restSeconds: 60,
+        label: 'Denys',
+        description: 'Default drill',
+        entrants: [{ name: 'Denys', description: 'Default drill' }],
+      },
+      {
+        workSeconds: 180,
+        restSeconds: 60,
+        label: 'Vlad',
+        description: 'Default drill',
+        entrants: [{ name: 'Vlad', description: 'Default drill' }],
+      },
+      {
+        workSeconds: 180,
+        restSeconds: 0,
+        label: 'Piter',
+        description: 'Default drill',
+        entrants: [{ name: 'Piter', description: 'Default drill' }],
+      },
     ]);
   });
 
@@ -158,13 +176,25 @@ describe('resolveRounds', () => {
       restSeconds: 60,
       description: 'Default drill',
       participants: [
-        { id: 'p1', names: ['Denys'], workSeconds: 120, restSeconds: 45, description: 'Mitts' },
-        { id: 'p2', names: ['Vlad'] },
+        { id: 'p1', entrants: [{ name: 'Denys' }], workSeconds: 120, restSeconds: 45, description: 'Mitts' },
+        { id: 'p2', entrants: [{ name: 'Vlad' }] },
       ],
     });
     expect(rounds).toEqual([
-      { workSeconds: 120, restSeconds: 45, label: 'Denys', description: 'Mitts' },
-      { workSeconds: 180, restSeconds: 0, label: 'Vlad', description: 'Default drill' },
+      {
+        workSeconds: 120,
+        restSeconds: 45,
+        label: 'Denys',
+        description: 'Mitts',
+        entrants: [{ name: 'Denys', description: 'Mitts' }],
+      },
+      {
+        workSeconds: 180,
+        restSeconds: 0,
+        label: 'Vlad',
+        description: 'Default drill',
+        entrants: [{ name: 'Vlad', description: 'Default drill' }],
+      },
     ]);
   });
 
@@ -173,9 +203,29 @@ describe('resolveRounds', () => {
       rounds: 1,
       workSeconds: 90,
       restSeconds: 30,
-      participants: [{ id: 'p1', names: ['Denys', 'Vlad'] }],
+      participants: [{ id: 'p1', entrants: [{ name: 'Denys' }, { name: 'Vlad' }] }],
     });
     expect(rounds[0].label).toBe('Denys & Vlad');
+  });
+
+  it('lets one entrant in a shared round override just their own description', () => {
+    const rounds = resolveRounds({
+      rounds: 1,
+      workSeconds: 180,
+      restSeconds: 60,
+      description: 'Default drill',
+      participants: [
+        {
+          id: 'p1',
+          description: '1-1-2',
+          entrants: [{ name: 'Denys' }, { name: 'Vlad', description: '1-2' }],
+        },
+      ],
+    });
+    expect(rounds[0].entrants).toEqual([
+      { name: 'Denys', description: '1-1-2' },
+      { name: 'Vlad', description: '1-2' },
+    ]);
   });
 });
 
