@@ -39,6 +39,7 @@ const SessionCardComponent = ({ session, onPress, onEdit, onDelete }: Props) => 
   const restValue = uniform
     ? formatSecondsToClock(restCandidates[0]?.restSeconds ?? 0)
     : 'Varies';
+  const participantNames = session.participants?.flatMap((participant) => participant.names) ?? [];
 
   const metricStyle = {
     display: 'flex',
@@ -116,6 +117,21 @@ const SessionCardComponent = ({ session, onPress, onEdit, onDelete }: Props) => 
                 <div style={{ marginTop: 4, fontSize: 13, fontWeight: 700, color: theme.colors.textMuted }}>
                   {rounds.length} rounds - {formatSecondsToClock(totalDuration)}
                 </div>
+                {participantNames.length > 0 ? (
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: theme.colors.textSubtle,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {participantNames.join(', ')}
+                  </div>
+                ) : null}
               </div>
               <span
                 style={{

@@ -4,14 +4,12 @@ import { memo } from 'react';
 // Theme
 import { useTheme } from '@/theme/ThemeProvider';
 
-// Types
-import { RoundConfig } from '@/types/models';
-
 // Utils
+import { ResolvedRound } from '@/utils/rounds';
 import { formatSecondsToClock } from '@/utils/timeFormat';
 
 type Props = {
-  rounds: RoundConfig[];
+  rounds: ResolvedRound[];
   /** 1-based round currently running. */
   currentRound: number;
   /** Jump to a 1-based round. */
@@ -63,6 +61,7 @@ const RoundTilesComponent = ({ rounds, currentRound, onSelect }: Props) => {
             style={{
               flex: '0 0 auto',
               minWidth: 56,
+              maxWidth: 88,
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
@@ -99,6 +98,21 @@ const RoundTilesComponent = ({ rounds, currentRound, onSelect }: Props) => {
             >
               {formatSecondsToClock(round.workSeconds)}
             </span>
+            {round.label ? (
+              <span
+                style={{
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontSize: 10,
+                  fontWeight: 800,
+                  color: isActive ? '#FFFFFF' : theme.colors.textMuted,
+                }}
+              >
+                {round.label}
+              </span>
+            ) : null}
           </button>
         );
       })}

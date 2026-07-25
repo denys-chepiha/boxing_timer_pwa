@@ -251,6 +251,42 @@ describe('SessionRunScreen', () => {
     await waitFor(() => expect(screen.getByText('Session not found')).toBeInTheDocument());
   });
 
+  it('shows who each round is for and its description under the timer', async () => {
+    await settingsStorage.save({
+      themeMode: 'system',
+      defaultSoundId: 'boxing-gong',
+      keepScreenAwake: false,
+      prepSeconds: 0,
+    });
+    await sessionsStorage.saveAll([
+      makeSession({
+        id: 'r6',
+        name: 'Named',
+        description: 'Default drill',
+        rounds: 2,
+        participants: [
+          { id: 'p1', names: ['Denys'] },
+          { id: 'p2', names: ['Vlad', 'Piter'], description: 'Mitts' },
+        ],
+      }),
+    ]);
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    const { container } = renderWithProviders(<SessionRunScreen {...runProps(nav, 'r6')} />);
+    const currentLabel = () => container.querySelector('.session-run-round-label')?.textContent;
+    const currentDescription = () => container.querySelector('.session-run-round-description')?.textContent;
+
+    await waitFor(() => expect(screen.getByText('Named')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Start' }));
+
+    expect(currentLabel()).toBe('Denys');
+    expect(currentDescription()).toBe('Default drill');
+
+    await user.click(screen.getByText('R2'));
+    expect(currentLabel()).toBe('Vlad & Piter');
+    expect(currentDescription()).toBe('Mitts');
+  });
+
   it('starts, pauses and persists an in-progress run', async () => {
     await sessionsStorage.saveAll([makeSession({ id: 'r1', name: 'Runner' })]);
     const user = userEvent.setup();
