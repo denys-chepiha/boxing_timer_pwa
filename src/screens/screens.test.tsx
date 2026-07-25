@@ -125,8 +125,8 @@ describe('SessionEditorScreen', () => {
     expect(saved.rounds).toBe(2);
     expect(saved.roundsConfig).toBeUndefined();
     expect(saved.participants).toEqual([
-      { id: expect.any(String), names: ['Denys'] },
-      { id: expect.any(String), names: ['Vlad'] },
+      { id: expect.any(String), entrants: [{ name: 'Denys' }] },
+      { id: expect.any(String), entrants: [{ name: 'Vlad' }] },
     ]);
     // Both names are registered for the roster picker on future workouts.
     expect(await rosterStorage.getAll()).toEqual(['Denys', 'Vlad']);
@@ -148,7 +148,35 @@ describe('SessionEditorScreen', () => {
 
     const [saved] = await sessionsStorage.getAll();
     expect(saved.rounds).toBe(1);
-    expect(saved.participants).toEqual([{ id: expect.any(String), names: ['Denys', 'Vlad'] }]);
+    expect(saved.participants).toEqual([
+      { id: expect.any(String), entrants: [{ name: 'Denys' }, { name: 'Vlad' }] },
+    ]);
+  });
+
+  it('lets one partner in a pair have their own note, while the other keeps the round default', async () => {
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Pairs with notes');
+    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.type(screen.getByLabelText('Name 1 for round 1'), 'Denys');
+    await user.click(screen.getByRole('button', { name: '+ Add partner' }));
+    await user.type(screen.getByLabelText('Name 2 for round 1'), 'Vlad');
+
+    // A per-partner note field only appears once a round has 2+ people.
+    await user.type(screen.getByLabelText('Note for Vlad in round 1'), '1-2');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
+
+    const [saved] = await sessionsStorage.getAll();
+    expect(saved.participants).toEqual([
+      {
+        id: expect.any(String),
+        entrants: [{ name: 'Denys' }, { name: 'Vlad', description: '1-2' }],
+      },
+    ]);
   });
 
   it('lets a participant override timing and description, inheriting session defaults otherwise', async () => {
@@ -169,7 +197,13 @@ describe('SessionEditorScreen', () => {
     // Customizing seeds the current session defaults (180/60) as this round's
     // explicit override, on top of the typed description.
     expect(saved.participants).toEqual([
-      { id: expect.any(String), names: ['Denys'], workSeconds: 180, restSeconds: 60, description: 'Mitts' },
+      {
+        id: expect.any(String),
+        entrants: [{ name: 'Denys' }],
+        workSeconds: 180,
+        restSeconds: 60,
+        description: 'Mitts',
+      },
     ]);
   });
 
@@ -265,8 +299,8 @@ describe('SessionRunScreen', () => {
         description: 'Default drill',
         rounds: 2,
         participants: [
-          { id: 'p1', names: ['Denys'] },
-          { id: 'p2', names: ['Vlad', 'Piter'], description: 'Mitts' },
+          { id: 'p1', entrants: [{ name: 'Denys' }] },
+          { id: 'p2', entrants: [{ name: 'Vlad' }, { name: 'Piter' }], description: 'Mitts' },
         ],
       }),
     ]);

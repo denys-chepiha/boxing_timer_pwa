@@ -183,8 +183,8 @@ describe('SessionCard', () => {
     const session = makeSession({
       rounds: 2,
       participants: [
-        { id: 'p1', names: ['Denys'] },
-        { id: 'p2', names: ['Vlad', 'Piter'] },
+        { id: 'p1', entrants: [{ name: 'Denys' }] },
+        { id: 'p2', entrants: [{ name: 'Vlad' }, { name: 'Piter' }] },
       ],
     });
     renderWithTheme(<SessionCard session={session} onPress={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} />);

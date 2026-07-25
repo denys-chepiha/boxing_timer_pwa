@@ -2,7 +2,7 @@
 import { localStore } from '@/storage/localStore';
 
 // Types
-import { Participant, RoundConfig, Session, SoundId } from '@/types/models';
+import { Entrant, Participant, RoundConfig, Session, SoundId } from '@/types/models';
 
 // Utils
 import { createId } from '@/utils/id';
@@ -28,6 +28,33 @@ const parseRoundsConfig = (value: unknown): RoundConfig[] | undefined => {
   return cleaned.length > 0 ? cleaned : undefined;
 };
 
+const parseEntrants = (value: unknown): Entrant[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry): Entrant | null => {
+      // Back-compat: earlier builds stored a plain name string per entrant.
+      if (typeof entry === 'string') {
+        return entry.trim().length > 0 ? { name: entry } : null;
+      }
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+      const raw = entry as Partial<Entrant>;
+      if (typeof raw.name !== 'string' || raw.name.trim().length === 0) {
+        return null;
+      }
+      const entrant: Entrant = { name: raw.name };
+      if (typeof raw.description === 'string' && raw.description.length > 0) {
+        entrant.description = raw.description;
+      }
+      return entrant;
+    })
+    .filter((entrant): entrant is Entrant => entrant !== null);
+};
+
 const parseParticipants = (value: unknown): Participant[] | undefined => {
   if (!Array.isArray(value) || value.length === 0) {
     return undefined;
@@ -38,17 +65,16 @@ const parseParticipants = (value: unknown): Participant[] | undefined => {
       if (!entry || typeof entry !== 'object') {
         return null;
       }
-      const raw = entry as Partial<Participant>;
-      const names = Array.isArray(raw.names)
-        ? raw.names.filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
-        : [];
-      if (names.length === 0) {
+      const raw = entry as Partial<Participant> & { names?: unknown };
+      // Back-compat: earlier builds stored `names: string[]` instead of `entrants`.
+      const entrants = parseEntrants(raw.entrants ?? raw.names);
+      if (entrants.length === 0) {
         return null;
       }
 
       const participant: Participant = {
         id: typeof raw.id === 'string' && raw.id.length > 0 ? raw.id : createId(),
-        names,
+        entrants,
       };
       if (typeof raw.description === 'string' && raw.description.length > 0) {
         participant.description = raw.description;

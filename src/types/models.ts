@@ -20,14 +20,27 @@ export type RoundConfig = {
 };
 
 /**
- * One round's worth of people. `names` holds everyone sharing that round
- * under a single clock — one name is a solo turn, two or more is a pair/group
- * training together. `description`/`workSeconds`/`restSeconds` override the
- * session defaults for this round; `undefined` means "inherit".
+ * One person sharing a round. `description` overrides the round's own
+ * description for just this person (e.g. one partner drills 1-1-2 while the
+ * other drills 1-2 under the same clock); `undefined` means "inherit the
+ * round's description".
+ */
+export type Entrant = {
+  name: string;
+  description?: string;
+};
+
+/**
+ * One round's worth of people. `entrants` holds everyone sharing that round
+ * under a single clock — one entrant is a solo turn, two or more is a
+ * pair/group training together. `description`/`workSeconds`/`restSeconds`
+ * override the session defaults for this round; `undefined` means "inherit".
+ * Timing is always shared by the whole round (one clock), but each entrant
+ * may still override the round's description individually.
  */
 export type Participant = {
   id: string;
-  names: string[];
+  entrants: Entrant[];
   description?: string;
   workSeconds?: number;
   restSeconds?: number;

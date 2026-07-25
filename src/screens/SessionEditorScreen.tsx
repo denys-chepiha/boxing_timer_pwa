@@ -89,7 +89,11 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
   );
   const [description, setDescription] = useState(current?.description ?? '');
   const [participants, setParticipants] = useState<Participant[]>(
-    () => current?.participants?.map((participant) => ({ ...participant, names: [...participant.names] })) ?? [],
+    () =>
+      current?.participants?.map((participant) => ({
+        ...participant,
+        entrants: participant.entrants.map((entrant) => ({ ...entrant })),
+      })) ?? [],
   );
   const [roster, setRoster] = useState<string[]>([]);
 
@@ -135,7 +139,7 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
   const totals = useMemo(() => sumRounds(roundList), [roundList]);
 
   const addParticipant = () => {
-    setParticipants((list) => [...list, { id: createId(), names: [''] }]);
+    setParticipants((list) => [...list, { id: createId(), entrants: [{ name: '' }] }]);
   };
 
   const removeParticipant = (id: string) => {
@@ -160,29 +164,49 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
     );
   };
 
-  const updateParticipantName = (id: string, nameIndex: number, value: string) => {
+  const updateEntrantName = (id: string, entrantIndex: number, value: string) => {
     setParticipants((list) =>
       list.map((participant) =>
         participant.id === id
-          ? { ...participant, names: participant.names.map((name, i) => (i === nameIndex ? value : name)) }
+          ? {
+              ...participant,
+              entrants: participant.entrants.map((entrant, i) =>
+                i === entrantIndex ? { ...entrant, name: value } : entrant,
+              ),
+            }
           : participant,
       ),
     );
   };
 
-  const addNameToParticipant = (id: string) => {
+  const updateEntrantDescription = (id: string, entrantIndex: number, value: string) => {
     setParticipants((list) =>
       list.map((participant) =>
-        participant.id === id ? { ...participant, names: [...participant.names, ''] } : participant,
+        participant.id === id
+          ? {
+              ...participant,
+              entrants: participant.entrants.map((entrant, i) =>
+                i === entrantIndex ? { ...entrant, description: value || undefined } : entrant,
+              ),
+            }
+          : participant,
       ),
     );
   };
 
-  const removeNameFromParticipant = (id: string, nameIndex: number) => {
+  const addEntrant = (id: string) => {
     setParticipants((list) =>
       list.map((participant) =>
-        participant.id === id && participant.names.length > 1
-          ? { ...participant, names: participant.names.filter((_, i) => i !== nameIndex) }
+        participant.id === id ? { ...participant, entrants: [...participant.entrants, { name: '' }] } : participant,
+      ),
+    );
+  };
+
+  const removeEntrant = (id: string, entrantIndex: number) => {
+    setParticipants((list) =>
+      list.map((participant) =>
+        participant.id === id && participant.entrants.length > 1
+          ? { ...participant, entrants: participant.entrants.filter((_, i) => i !== entrantIndex) }
           : participant,
       ),
     );
@@ -249,10 +273,12 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
     if (participants.length > 0) {
       const cleanedParticipants = participants.map((participant) => ({
         ...participant,
-        names: participant.names.map((n) => n.trim()).filter(Boolean),
+        entrants: participant.entrants
+          .map((entrant) => ({ ...entrant, name: entrant.name.trim() }))
+          .filter((entrant) => entrant.name.length > 0),
       }));
 
-      if (cleanedParticipants.some((participant) => participant.names.length === 0)) {
+      if (cleanedParticipants.some((participant) => participant.entrants.length === 0)) {
         notify('Every person needs a name');
         return;
       }
@@ -275,7 +301,9 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
         await updateSession(current.id, draft);
       }
 
-      await rosterStorage.addMany(cleanedParticipants.flatMap((participant) => participant.names));
+      await rosterStorage.addMany(
+        cleanedParticipants.flatMap((participant) => participant.entrants.map((entrant) => entrant.name)),
+      );
 
       navigation.goBack();
       return;
@@ -555,25 +583,53 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {participant.names.map((personName, nameIndex) => (
-                      <div key={nameIndex} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <NameCombobox
-                          value={personName}
-                          onChange={(next) => updateParticipantName(participant.id, nameIndex, next)}
-                          suggestions={roster}
-                          onRemoveSuggestion={handleRemoveFromRoster}
-                          placeholder={nameIndex === 0 ? 'Name' : 'Partner name'}
-                          ariaLabel={`Name ${nameIndex + 1} for round ${index + 1}`}
-                        />
-                        {participant.names.length > 1 ? (
-                          <button
-                            type="button"
-                            onClick={() => removeNameFromParticipant(participant.id, nameIndex)}
-                            aria-label={`Remove name ${nameIndex + 1} from round ${index + 1}`}
-                            style={roundGhostButtonStyle}
-                          >
-                            ×
-                          </button>
+                    {participant.entrants.map((entrant, entrantIndex) => (
+                      <div key={entrantIndex} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <NameCombobox
+                            value={entrant.name}
+                            onChange={(next) => updateEntrantName(participant.id, entrantIndex, next)}
+                            suggestions={roster}
+                            onRemoveSuggestion={handleRemoveFromRoster}
+                            placeholder={entrantIndex === 0 ? 'Name' : 'Partner name'}
+                            ariaLabel={`Name ${entrantIndex + 1} for round ${index + 1}`}
+                          />
+                          {participant.entrants.length > 1 ? (
+                            <button
+                              type="button"
+                              onClick={() => removeEntrant(participant.id, entrantIndex)}
+                              aria-label={`Remove name ${entrantIndex + 1} from round ${index + 1}`}
+                              style={roundGhostButtonStyle}
+                            >
+                              ×
+                            </button>
+                          ) : null}
+                        </div>
+                        {participant.entrants.length > 1 ? (
+                          <input
+                            {...plainTextInputProps}
+                            type="text"
+                            enterKeyHint="done"
+                            aria-label={`Note for ${entrant.name || `partner ${entrantIndex + 1}`} in round ${index + 1}`}
+                            value={entrant.description ?? ''}
+                            onChange={(event) =>
+                              updateEntrantDescription(participant.id, entrantIndex, event.target.value)
+                            }
+                            placeholder={`Same as round${participant.description || description ? ` (${participant.description ?? description})` : ''}`}
+                            style={{
+                              height: 42,
+                              marginLeft: 12,
+                              borderWidth: 1,
+                              borderStyle: 'solid',
+                              borderColor: theme.colors.border,
+                              backgroundColor: theme.colors.input,
+                              borderRadius: 8,
+                              padding: '0 12px',
+                              fontSize: 13,
+                              fontWeight: 700,
+                              color: theme.colors.text,
+                            }}
+                          />
                         ) : null}
                       </div>
                     ))}
@@ -581,7 +637,7 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
                       label="+ Add partner"
                       variant="secondary"
                       size="sm"
-                      onPress={() => addNameToParticipant(participant.id)}
+                      onPress={() => addEntrant(participant.id)}
                     />
                   </div>
 

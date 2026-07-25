@@ -39,7 +39,8 @@ const SessionCardComponent = ({ session, onPress, onEdit, onDelete }: Props) => 
   const restValue = uniform
     ? formatSecondsToClock(restCandidates[0]?.restSeconds ?? 0)
     : 'Varies';
-  const participantNames = session.participants?.flatMap((participant) => participant.names) ?? [];
+  const participantNames =
+    session.participants?.flatMap((participant) => participant.entrants.map((entrant) => entrant.name)) ?? [];
 
   const metricStyle = {
     display: 'flex',
