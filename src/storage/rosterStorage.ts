@@ -43,11 +43,18 @@ export const rosterStorage = {
   },
 
   async add(name: string): Promise<string[]> {
-    if (!name.trim()) {
-      return rosterStorage.getAll();
-    }
+    return rosterStorage.addMany([name]);
+  },
+
+  /**
+   * Adds several names in one read-modify-write. Adding names one at a time
+   * via concurrent `add()` calls (e.g. `Promise.all`) races on the shared
+   * read-then-write and silently drops all but the last write — always batch
+   * a multi-name save through this instead.
+   */
+  async addMany(names: string[]): Promise<string[]> {
     const current = await rosterStorage.getAll();
-    const next = normalize([...current, name]);
+    const next = normalize([...current, ...names]);
     await localStore.setItem(ROSTER_KEY, JSON.stringify(next));
     return next;
   },

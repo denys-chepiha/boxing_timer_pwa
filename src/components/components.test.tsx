@@ -3,6 +3,7 @@ import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 // Components
+import { NameCombobox } from '@/components/NameCombobox';
 import { NumberField } from '@/components/NumberField';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ROUND_EVEN_COLOR, ROUND_ODD_COLOR, RoundTiles, roundColor } from '@/components/RoundTiles';
@@ -57,6 +58,73 @@ describe('NumberField', () => {
     expect(input).toHaveAttribute('autocomplete', 'off');
     expect(input).toHaveAttribute('autocorrect', 'off');
     expect(input).toHaveAttribute('inputmode', 'numeric');
+  });
+});
+
+describe('NameCombobox', () => {
+  it('reports typed input to onChange', () => {
+    const onChange = vi.fn();
+    renderWithTheme(<NameCombobox value="" onChange={onChange} suggestions={[]} ariaLabel="Name" />);
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Den' } });
+    expect(onChange).toHaveBeenCalledWith('Den');
+  });
+
+  it('shows every saved name on focus', async () => {
+    const user = userEvent.setup();
+    renderWithTheme(
+      <NameCombobox value="" onChange={vi.fn()} suggestions={['Denys', 'Vlad', 'Piter']} ariaLabel="Name" />,
+    );
+    await user.click(screen.getByLabelText('Name'));
+    expect(screen.getByRole('option', { name: 'Denys' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Vlad' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Piter' })).toBeInTheDocument();
+  });
+
+  it('filters suggestions down to those matching the current value', async () => {
+    const user = userEvent.setup();
+    renderWithTheme(
+      <NameCombobox value="de" onChange={vi.fn()} suggestions={['Denys', 'Vlad', 'Piter']} ariaLabel="Name" />,
+    );
+    await user.click(screen.getByLabelText('Name'));
+    expect(screen.getByRole('option', { name: 'Denys' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Vlad' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Piter' })).not.toBeInTheDocument();
+  });
+
+  it('selects a suggestion and closes the dropdown', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderWithTheme(<NameCombobox value="" onChange={onChange} suggestions={['Denys']} ariaLabel="Name" />);
+    await user.click(screen.getByLabelText('Name'));
+    await user.click(screen.getByRole('option', { name: 'Denys' }));
+    expect(onChange).toHaveBeenCalledWith('Denys');
+    expect(screen.queryByRole('option', { name: 'Denys' })).not.toBeInTheDocument();
+  });
+
+  it('removes a saved name via its suggestion row', async () => {
+    const user = userEvent.setup();
+    const onRemoveSuggestion = vi.fn();
+    renderWithTheme(
+      <NameCombobox
+        value=""
+        onChange={vi.fn()}
+        suggestions={['Denys']}
+        onRemoveSuggestion={onRemoveSuggestion}
+        ariaLabel="Name"
+      />,
+    );
+    await user.click(screen.getByLabelText('Name'));
+    await user.click(screen.getByRole('button', { name: 'Remove Denys from saved names' }));
+    expect(onRemoveSuggestion).toHaveBeenCalledWith('Denys');
+  });
+
+  it('keeps the field free of iOS autofill/autocorrect interference', () => {
+    renderWithTheme(<NameCombobox value="" onChange={vi.fn()} suggestions={[]} ariaLabel="Name" />);
+    const input = screen.getByLabelText('Name');
+    expect(input).toHaveAttribute('autocomplete', 'off');
+    expect(input).toHaveAttribute('autocorrect', 'off');
+    expect(input).toHaveAttribute('autocapitalize', 'off');
+    expect(input).toHaveAttribute('spellcheck', 'false');
   });
 });
 

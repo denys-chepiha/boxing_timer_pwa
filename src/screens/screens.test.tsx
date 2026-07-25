@@ -9,6 +9,7 @@ import { SessionEditorScreen } from '@/screens/SessionEditorScreen';
 import { SessionRunScreen } from '@/screens/SessionRunScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 // Storage
+import { rosterStorage } from '@/storage/rosterStorage';
 import { runStateStorage } from '@/storage/runStateStorage';
 import { sessionsStorage } from '@/storage/sessionsStorage';
 import { settingsStorage } from '@/storage/settingsStorage';
@@ -82,6 +83,108 @@ describe('SessionEditorScreen', () => {
     await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
     const [saved] = await sessionsStorage.getAll();
     expect(saved.roundsConfig).toHaveLength(3);
+  });
+
+  it('saves a description shown independently of participants', async () => {
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Combos');
+    await user.type(
+      screen.getByPlaceholderText('e.g. Jab-cross-hook combos, light footwork'),
+      'Jab-cross combos',
+    );
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
+    const [saved] = await sessionsStorage.getAll();
+    expect(saved.description).toBe('Jab-cross combos');
+    expect(saved.participants).toBeUndefined();
+  });
+
+  it('adds named participants, one round per person, replacing round-count controls', async () => {
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Group Circuit');
+    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.type(screen.getByLabelText('Name 1 for round 1'), 'Denys');
+    expect(screen.getByText("Who's training (1)")).toBeInTheDocument();
+    expect(screen.queryByText('Round timing')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.type(screen.getByLabelText('Name 1 for round 2'), 'Vlad');
+    expect(screen.getByText(/Rounds: 2/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
+
+    const [saved] = await sessionsStorage.getAll();
+    expect(saved.rounds).toBe(2);
+    expect(saved.roundsConfig).toBeUndefined();
+    expect(saved.participants).toEqual([
+      { id: expect.any(String), names: ['Denys'] },
+      { id: expect.any(String), names: ['Vlad'] },
+    ]);
+    // Both names are registered for the roster picker on future workouts.
+    expect(await rosterStorage.getAll()).toEqual(['Denys', 'Vlad']);
+  });
+
+  it('adds a second name to a round for pair training under one clock', async () => {
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Pairs');
+    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.type(screen.getByLabelText('Name 1 for round 1'), 'Denys');
+    await user.click(screen.getByRole('button', { name: '+ Add partner' }));
+    await user.type(screen.getByLabelText('Name 2 for round 1'), 'Vlad');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
+
+    const [saved] = await sessionsStorage.getAll();
+    expect(saved.rounds).toBe(1);
+    expect(saved.participants).toEqual([{ id: expect.any(String), names: ['Denys', 'Vlad'] }]);
+  });
+
+  it('lets a participant override timing and description, inheriting session defaults otherwise', async () => {
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Overrides');
+    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.type(screen.getByLabelText('Name 1 for round 1'), 'Denys');
+    await user.click(screen.getByRole('button', { name: 'Customize timing & description' }));
+    await user.type(screen.getByLabelText('Description for round 1'), 'Mitts');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
+
+    const [saved] = await sessionsStorage.getAll();
+    // Customizing seeds the current session defaults (180/60) as this round's
+    // explicit override, on top of the typed description.
+    expect(saved.participants).toEqual([
+      { id: expect.any(String), names: ['Denys'], workSeconds: 180, restSeconds: 60, description: 'Mitts' },
+    ]);
+  });
+
+  it('blocks saving when a participant is left without a name', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Incomplete');
+    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(alertSpy).toHaveBeenCalledWith('Every person needs a name');
+    expect(nav.goBack).not.toHaveBeenCalled();
   });
 
   it('edits an existing session (already loaded in the provider)', async () => {

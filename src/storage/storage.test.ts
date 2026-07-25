@@ -195,6 +195,21 @@ describe('rosterStorage', () => {
     expect(await rosterStorage.getAll()).toEqual([]);
   });
 
+  it('addMany saves every name from one batch (no lost-update race)', async () => {
+    // Regression: adding names one at a time via concurrent add() calls
+    // (Promise.all) races on the shared read-then-write and drops all but
+    // the last write. A save with several new names must go through addMany
+    // instead so they all land in one read-modify-write.
+    await rosterStorage.addMany(['Denys', 'Vlad', 'Piter']);
+    expect(await rosterStorage.getAll()).toEqual(['Denys', 'Piter', 'Vlad']);
+  });
+
+  it('addMany merges with and dedupes against the existing roster', async () => {
+    await rosterStorage.add('Denys');
+    await rosterStorage.addMany(['denys', 'Vlad']);
+    expect(await rosterStorage.getAll()).toEqual(['Denys', 'Vlad']);
+  });
+
   it('removes a name case-insensitively', async () => {
     await rosterStorage.add('Denys');
     await rosterStorage.add('Vlad');

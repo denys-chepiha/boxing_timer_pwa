@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { sessionsStorage } from '@/storage/sessionsStorage';
 
 // Types
-import { RoundConfig, Session, SessionCategory, SoundId } from '@/types/models';
+import { Participant, RoundConfig, Session, SessionCategory, SoundId } from '@/types/models';
 
 // Utils
 import { createId } from '@/utils/id';
@@ -17,6 +17,8 @@ type SessionDraft = {
   workSeconds: number;
   restSeconds: number;
   roundsConfig?: RoundConfig[];
+  description?: string;
+  participants?: Participant[];
   soundId: SoundId;
 };
 
