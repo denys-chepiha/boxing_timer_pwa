@@ -19,6 +19,20 @@ export type RoundConfig = {
   restSeconds: number;
 };
 
+/**
+ * One round's worth of people. `names` holds everyone sharing that round
+ * under a single clock — one name is a solo turn, two or more is a pair/group
+ * training together. `description`/`workSeconds`/`restSeconds` override the
+ * session defaults for this round; `undefined` means "inherit".
+ */
+export type Participant = {
+  id: string;
+  names: string[];
+  description?: string;
+  workSeconds?: number;
+  restSeconds?: number;
+};
+
 export type Session = {
   id: string;
   name: string;
@@ -28,6 +42,13 @@ export type Session = {
   restSeconds: number;
   /** Optional individual timing for each round. Length equals `rounds`. */
   roundsConfig?: RoundConfig[];
+  /** Default description shown under the timer; overridable per participant. */
+  description?: string;
+  /**
+   * When set and non-empty, one round per entry (in order) and this
+   * supersedes `roundsConfig` — round count becomes `participants.length`.
+   */
+  participants?: Participant[];
   soundId: SoundId;
   createdAt: number;
   updatedAt: number;

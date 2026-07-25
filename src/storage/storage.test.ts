@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { TimerSnapshot } from '@/engine/timerEngine';
 // Storage
 import { localStore } from '@/storage/localStore';
+import { rosterStorage } from '@/storage/rosterStorage';
 import { runStateStorage } from '@/storage/runStateStorage';
 import { sessionsStorage } from '@/storage/sessionsStorage';
 import { defaultSettings, settingsStorage } from '@/storage/settingsStorage';
@@ -111,11 +112,94 @@ describe('sessionsStorage', () => {
     expect(loaded.roundsConfig).toBeUndefined();
   });
 
+  it('round-trips participants and a description', async () => {
+    const session = sampleSession({
+      description: 'Heavy bag combos',
+      participants: [
+        { id: 'p1', names: ['Denys'], workSeconds: 120, restSeconds: 45, description: 'Mitts' },
+        { id: 'p2', names: ['Vlad', 'Piter'] },
+      ],
+    });
+    await sessionsStorage.saveAll([session]);
+    expect(await sessionsStorage.getAll()).toEqual([session]);
+  });
+
+  it('sanitises malformed participants on read', async () => {
+    await localStore.setItem(
+      'box_timer_sessions_v1',
+      JSON.stringify([
+        sampleSession({
+          participants: [
+            { id: 'p1', names: ['  Denys  '], workSeconds: 12.9, restSeconds: -4 },
+            { names: [] }, // no names -> dropped
+            { names: ['', '  '] }, // blank names -> dropped
+            { id: 'p2', names: ['Vlad'] },
+            'not-an-object',
+          ] as unknown as Session['participants'],
+        }),
+      ]),
+    );
+    const [loaded] = await sessionsStorage.getAll();
+    expect(loaded.participants).toEqual([
+      { id: 'p1', names: ['  Denys  '], workSeconds: 12, restSeconds: 0 },
+      { id: 'p2', names: ['Vlad'] },
+    ]);
+  });
+
+  it('drops an empty participants list to undefined', async () => {
+    await localStore.setItem(
+      'box_timer_sessions_v1',
+      JSON.stringify([sampleSession({ participants: [] })]),
+    );
+    const [loaded] = await sessionsStorage.getAll();
+    expect(loaded.participants).toBeUndefined();
+  });
+
+  it('drops a blank description to undefined', async () => {
+    await localStore.setItem(
+      'box_timer_sessions_v1',
+      JSON.stringify([sampleSession({ description: '' })]),
+    );
+    const [loaded] = await sessionsStorage.getAll();
+    expect(loaded.description).toBeUndefined();
+  });
+
   it('returns an empty list on malformed JSON or non-array data', async () => {
     await localStore.setItem('box_timer_sessions_v1', '{nope');
     expect(await sessionsStorage.getAll()).toEqual([]);
     await localStore.setItem('box_timer_sessions_v1', JSON.stringify({ a: 1 }));
     expect(await sessionsStorage.getAll()).toEqual([]);
+  });
+});
+
+describe('rosterStorage', () => {
+  it('returns an empty list when empty', async () => {
+    expect(await rosterStorage.getAll()).toEqual([]);
+  });
+
+  it('adds names, sorted alphabetically', async () => {
+    await rosterStorage.add('Vlad');
+    await rosterStorage.add('Denys');
+    expect(await rosterStorage.getAll()).toEqual(['Denys', 'Vlad']);
+  });
+
+  it('dedupes case-insensitively, keeping the first-seen casing', async () => {
+    await rosterStorage.add('Denys');
+    await rosterStorage.add('denys');
+    await rosterStorage.add('DENYS');
+    expect(await rosterStorage.getAll()).toEqual(['Denys']);
+  });
+
+  it('ignores a blank name', async () => {
+    await rosterStorage.add('   ');
+    expect(await rosterStorage.getAll()).toEqual([]);
+  });
+
+  it('removes a name case-insensitively', async () => {
+    await rosterStorage.add('Denys');
+    await rosterStorage.add('Vlad');
+    await rosterStorage.remove('denys');
+    expect(await rosterStorage.getAll()).toEqual(['Vlad']);
   });
 });
 
