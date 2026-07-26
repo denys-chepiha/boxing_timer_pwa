@@ -1,34 +1,19 @@
-// Core
 import { useEffect, useMemo, useState } from 'react';
 
-// App
 import { useSessions } from '@/app/SessionsProvider';
-
-// Components
+import { IconButton } from '@/components/IconButton';
+import { ArrowLeftIcon, PlusIcon, TrashIcon } from '@/components/Icons';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { TimeWheelField } from '@/components/TimeWheelField';
-
-// Hooks
+import { plainTextInputProps } from '@/consts/forms';
 import { soundOptions, useSound } from '@/hooks/useSound';
-
-// Navigation
 import { ScreenProps } from '@/navigation/RootNavigator';
-
-// Storage
 import { rosterStorage } from '@/storage/rosterStorage';
 import { defaultSettings, settingsStorage } from '@/storage/settingsStorage';
-
-// Theme
 import { useTheme } from '@/theme/ThemeProvider';
-
-// Types
 import { ThemeMode } from '@/types/models';
-
-// Utils
 import { notify } from '@/utils/dialog';
-// Consts
-import { plainTextInputProps } from '@/consts/forms';
 
 const themeOptions: { label: string; value: ThemeMode }[] = [
   { label: 'System', value: 'system' },
@@ -43,7 +28,7 @@ const soundLabel = (label: string) =>
     .replace('Gong (Legacy)', 'Gong');
 
 export const SettingsScreen = ({ navigation }: ScreenProps<'Settings'>) => {
-  const { theme, mode, setMode } = useTheme();
+  const { mode, setMode } = useTheme();
   const { applySoundToAll } = useSessions();
   const { play } = useSound();
   const [defaultSoundId, setDefaultSoundId] = useState(defaultSettings.defaultSoundId);
@@ -54,19 +39,13 @@ export const SettingsScreen = ({ navigation }: ScreenProps<'Settings'>) => {
 
   useEffect(() => {
     let mounted = true;
-
-    const load = async () => {
-      const settings = await settingsStorage.get();
-      if (!mounted) {
-        return;
+    void settingsStorage.get().then((settings) => {
+      if (mounted) {
+        setDefaultSoundId(settings.defaultSoundId);
+        setKeepScreenAwake(settings.keepScreenAwake);
+        setPrepSeconds(settings.prepSeconds);
       }
-      setDefaultSoundId(settings.defaultSoundId);
-      setKeepScreenAwake(settings.keepScreenAwake);
-      setPrepSeconds(settings.prepSeconds);
-    };
-
-    void load();
-
+    });
     return () => {
       mounted = false;
     };
@@ -74,16 +53,11 @@ export const SettingsScreen = ({ navigation }: ScreenProps<'Settings'>) => {
 
   useEffect(() => {
     let mounted = true;
-
-    const loadRoster = async () => {
-      const names = await rosterStorage.getAll();
+    void rosterStorage.getAll().then((names) => {
       if (mounted) {
         setRoster(names);
       }
-    };
-
-    void loadRoster();
-
+    });
     return () => {
       mounted = false;
     };
@@ -94,14 +68,12 @@ export const SettingsScreen = ({ navigation }: ScreenProps<'Settings'>) => {
     if (!trimmed) {
       return;
     }
-    const next = await rosterStorage.add(trimmed);
-    setRoster(next);
+    setRoster(await rosterStorage.add(trimmed));
     setNewBoxerName('');
   };
 
   const removeBoxer = async (nameToRemove: string) => {
-    const next = await rosterStorage.remove(nameToRemove);
-    setRoster(next);
+    setRoster(await rosterStorage.remove(nameToRemove));
   };
 
   const save = async () => {
@@ -117,7 +89,6 @@ export const SettingsScreen = ({ navigation }: ScreenProps<'Settings'>) => {
       prepSeconds,
     });
     await applySoundToAll(defaultSoundId);
-
     navigation.navigate('SessionsList');
   };
 
@@ -126,222 +97,153 @@ export const SettingsScreen = ({ navigation }: ScreenProps<'Settings'>) => {
     [],
   );
 
-  const labelStyle = {
-    fontSize: 12,
-    fontWeight: 900,
-    letterSpacing: 1.1,
-    textTransform: 'uppercase' as const,
-    color: theme.colors.textMuted,
-  };
-
-  const sectionStyle = {
-    borderWidth: 1,
-    borderStyle: 'solid' as const,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.card,
-    borderRadius: 8,
-    padding: 16,
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 12,
-    boxShadow: theme.isDark ? 'none' : '0 12px 28px rgba(17, 24, 39, 0.06)',
-  };
-
   return (
-    <div
-      className="app-shell scroll-area"
-      style={{
-        backgroundColor: theme.colors.background,
-        padding: '42px 14px 24px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <div
-        style={{
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.card,
-          borderRadius: 8,
-          padding: 14,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-        }}
-      >
-        <PrimaryButton label="Back" variant="secondary" size="sm" onPress={() => navigation.goBack()} />
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1.1, color: theme.colors.textMuted }}>
-            APP
-          </div>
-          <h1 style={{ margin: '2px 0 0', fontSize: 24, fontWeight: 950, color: theme.colors.text }}>
-            Settings
-          </h1>
-        </div>
-      </div>
-
-      <div style={sectionStyle}>
-        <span style={labelStyle}>Theme</span>
-        <SegmentedControl value={mode} onChange={(next) => void setMode(next)} options={themeOptions} maxPerRow={3} />
-      </div>
-
-      <div style={sectionStyle}>
-        <span style={labelStyle}>Default Sound</span>
-        <SegmentedControl
-          value={defaultSoundId}
-          onChange={(next) => {
-            setDefaultSoundId(next);
-            void play(next, { vibrate: false });
-          }}
-          options={soundSegmentOptions}
-          maxPerRow={3}
+    <main className="app-shell settings-screen screen-enter">
+      <header className="screen-topbar">
+        <IconButton
+          ariaLabel="Back"
+          icon={<ArrowLeftIcon />}
+          onPress={() => navigation.goBack()}
         />
-      </div>
-
-      <div style={sectionStyle}>
-        <div>
-          <span style={labelStyle}>Boxers</span>
-          <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
-            Saved athletes you can pick from when naming rounds in a workout.
-          </div>
+        <div className="screen-topbar__title">
+          <h1>Settings</h1>
+          <p>Defaults for every workout</p>
         </div>
+        <div style={{ width: 44 }} aria-hidden="true" />
+      </header>
 
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            {...plainTextInputProps}
-            type="text"
-            enterKeyHint="done"
-            aria-label="New boxer name"
-            value={newBoxerName}
-            onChange={(event) => setNewBoxerName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                void addBoxer();
-              }
-            }}
-            placeholder="Add a boxer"
-            style={{
-              flex: 1,
-              height: 48,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: theme.colors.border,
-              backgroundColor: theme.colors.input,
-              borderRadius: 8,
-              padding: '0 14px',
-              fontSize: 15,
-              fontWeight: 800,
-              color: theme.colors.text,
-            }}
+      <div className="scroll-area settings-content">
+        <section className="surface-section">
+          <div>
+            <h2 className="section-heading">Appearance</h2>
+            <p className="section-description">
+              Follow the device or choose a theme for the gym.
+            </p>
+          </div>
+          <SegmentedControl
+            value={mode}
+            onChange={(next) => void setMode(next)}
+            options={themeOptions}
+            maxPerRow={3}
           />
-          <PrimaryButton label="Add" onPress={() => void addBoxer()} />
-        </div>
+        </section>
 
-        {roster.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {roster.map((boxerName) => (
-              <div
-                key={boxerName}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                  borderColor: theme.colors.border,
-                  backgroundColor: theme.colors.surface,
-                  borderRadius: 8,
-                  padding: '10px 12px',
-                }}
-              >
-                <span style={{ fontSize: 15, fontWeight: 800, color: theme.colors.text }}>{boxerName}</span>
-                <button
-                  type="button"
-                  onClick={() => void removeBoxer(boxerName)}
-                  aria-label={`Remove ${boxerName}`}
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 6,
-                    border: 'none',
-                    background: 'transparent',
-                    color: theme.colors.textMuted,
-                    fontSize: 16,
-                    fontWeight: 900,
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+        <section className="surface-section">
+          <div>
+            <h2 className="section-heading">Default bell</h2>
+            <p className="section-description">
+              Tap a sound to preview it. Saving applies it to all programs.
+            </p>
           </div>
-        ) : (
-          <div
-            style={{
-              textAlign: 'center',
-              padding: '8px 0',
-              fontSize: 14,
-              fontWeight: 700,
-              color: theme.colors.textMuted,
+          <SegmentedControl
+            value={defaultSoundId}
+            onChange={(next) => {
+              setDefaultSoundId(next);
+              void play(next, { vibrate: false });
             }}
-          >
-            No boxers saved yet.
-          </div>
-        )}
-      </div>
+            options={soundSegmentOptions}
+            maxPerRow={3}
+          />
+        </section>
 
-      <div style={sectionStyle}>
-        <div>
-          <span style={labelStyle}>Get ready (before round 1)</span>
-          <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
-            Countdown to put your gloves on before the first round starts.
+        <section className="surface-section">
+          <div>
+            <h2 className="section-heading">Boxers</h2>
+            <p className="section-description">
+              Save athletes once, then assign them to rounds in group and pair training.
+            </p>
           </div>
-        </div>
-        <div style={{ display: 'flex' }}>
-          <TimeWheelField
-            label="GET READY"
-            valueSeconds={prepSeconds}
-            onChange={setPrepSeconds}
-            minSeconds={0}
-            maxMinutes={10}
+
+          <div className="roster-add">
+            <input
+              {...plainTextInputProps}
+              className="text-field"
+              type="text"
+              enterKeyHint="done"
+              aria-label="New boxer name"
+              value={newBoxerName}
+              onChange={(event) => setNewBoxerName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void addBoxer();
+                }
+              }}
+              placeholder="Add a boxer"
+            />
+            <PrimaryButton
+              label="Add"
+              icon={<PlusIcon />}
+              onPress={() => void addBoxer()}
+            />
+          </div>
+
+          {roster.length > 0 ? (
+            <div className="roster-list">
+              {roster.map((boxerName) => (
+                <div key={boxerName} className="roster-row">
+                  <span className="roster-row__name">{boxerName}</span>
+                  <IconButton
+                    ariaLabel={`Remove ${boxerName}`}
+                    icon={<TrashIcon />}
+                    onPress={() => void removeBoxer(boxerName)}
+                    variant="ghost"
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="roster-empty">No boxers saved yet.</div>
+          )}
+        </section>
+
+        <section className="surface-section">
+          <div>
+            <h2 className="section-heading">Get ready countdown</h2>
+            <p className="section-description">
+              Time to put your gloves on before the first round begins.
+            </p>
+          </div>
+          <div style={{ display: 'flex', maxWidth: 210 }}>
+            <TimeWheelField
+              label="GET READY"
+              valueSeconds={prepSeconds}
+              onChange={setPrepSeconds}
+              minSeconds={0}
+              maxMinutes={10}
+            />
+          </div>
+        </section>
+
+        <section className="surface-section">
+          <label className="toggle-row">
+            <div className="toggle-row__copy">
+              <h2 className="section-heading">Keep screen awake</h2>
+              <p className="section-description">
+                Prevent the display from sleeping while a workout is active.
+              </p>
+            </div>
+            <span className="toggle">
+              <input
+                type="checkbox"
+                checked={keepScreenAwake}
+                onChange={(event) => setKeepScreenAwake(event.target.checked)}
+              />
+              <span className="toggle__track" aria-hidden="true" />
+              <span className="toggle__thumb" aria-hidden="true" />
+            </span>
+          </label>
+        </section>
+
+        <div className="settings-save">
+          <PrimaryButton
+            label="Save settings"
+            onPress={save}
+            size="lg"
+            style={{ width: '100%' }}
           />
         </div>
       </div>
-
-      <label
-        style={{
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.card,
-          borderRadius: 8,
-          padding: 16,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 14,
-          cursor: 'pointer',
-          boxShadow: theme.isDark ? 'none' : '0 12px 28px rgba(17, 24, 39, 0.06)',
-        }}
-      >
-        <div>
-          <div style={{ color: theme.colors.text, fontWeight: 900 }}>Keep screen awake</div>
-          <div style={{ marginTop: 3, color: theme.colors.textMuted, fontSize: 13, fontWeight: 700 }}>
-            Prevent the display from sleeping during a session.
-          </div>
-        </div>
-        <input
-          type="checkbox"
-          checked={keepScreenAwake}
-          onChange={(event) => setKeepScreenAwake(event.target.checked)}
-          style={{ width: 24, height: 24, flex: '0 0 auto', accentColor: theme.colors.primary }}
-        />
-      </label>
-
-      <PrimaryButton label="Save settings" onPress={save} size="lg" />
-    </div>
+    </main>
   );
 };

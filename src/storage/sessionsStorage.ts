@@ -17,13 +17,19 @@ const parseRoundsConfig = (value: unknown): RoundConfig[] | undefined => {
 
   const cleaned = value
     .filter(
-      (round): round is { workSeconds: number; restSeconds?: number } =>
+      (round): round is RoundConfig =>
         !!round && typeof (round as RoundConfig).workSeconds === 'number',
     )
-    .map((round) => ({
-      workSeconds: Math.max(1, Math.floor(round.workSeconds)),
-      restSeconds: Math.max(0, Math.floor(round.restSeconds ?? 0)),
-    }));
+    .map((round) => {
+      const cleanedRound: RoundConfig = {
+        workSeconds: Math.max(1, Math.floor(round.workSeconds)),
+        restSeconds: Math.max(0, Math.floor(round.restSeconds ?? 0)),
+      };
+      if (typeof round.description === 'string' && round.description.length > 0) {
+        cleanedRound.description = round.description;
+      }
+      return cleanedRound;
+    });
 
   return cleaned.length > 0 ? cleaned : undefined;
 };
@@ -49,6 +55,12 @@ const parseEntrants = (value: unknown): Entrant[] => {
       const entrant: Entrant = { name: raw.name };
       if (typeof raw.description === 'string' && raw.description.length > 0) {
         entrant.description = raw.description;
+      }
+      if (typeof raw.workSeconds === 'number') {
+        entrant.workSeconds = Math.max(1, Math.floor(raw.workSeconds));
+      }
+      if (typeof raw.restSeconds === 'number') {
+        entrant.restSeconds = Math.max(0, Math.floor(raw.restSeconds));
       }
       return entrant;
     })
@@ -107,6 +119,10 @@ const parseSessions = (raw: string | null): Session[] => {
       ...session,
       roundsConfig: parseRoundsConfig((session as Session).roundsConfig),
       participants: parseParticipants((session as Session).participants),
+      trainingMode:
+        session.trainingMode === 'group' || session.trainingMode === 'pair'
+          ? session.trainingMode
+          : undefined,
       description:
         typeof session.description === 'string' && session.description.length > 0
           ? session.description

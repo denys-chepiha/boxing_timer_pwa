@@ -5,8 +5,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSessions } from '@/app/SessionsProvider';
 
 // Components
+import { IconButton } from '@/components/IconButton';
+import {
+  ArrowLeftIcon,
+  PauseIcon,
+  PlayIcon,
+  RepeatIcon,
+  SkipForwardIcon,
+  StopIcon,
+} from '@/components/Icons';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { RoundTiles, roundColor } from '@/components/RoundTiles';
+import { RoundTiles } from '@/components/RoundTiles';
 import { TimerDisplay } from '@/components/TimerDisplay';
 
 // Hooks
@@ -30,9 +39,6 @@ import { useTheme } from '@/theme/ThemeProvider';
 // Utils
 import { resolveRounds } from '@/utils/rounds';
 import { formatSecondsToClock } from '@/utils/timeFormat';
-
-const toGradient = (colors: readonly string[]): string =>
-  `linear-gradient(135deg, ${colors.join(', ')})`;
 
 const vibrate = (durationMs: number) => {
   if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
@@ -91,6 +97,7 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
         roundsConfig: session?.roundsConfig,
         description: session?.description,
         participants: session?.participants,
+        trainingMode: session?.trainingMode,
       }),
     [
       session?.restSeconds,
@@ -99,6 +106,7 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
       session?.roundsConfig,
       session?.description,
       session?.participants,
+      session?.trainingMode,
     ],
   );
 
@@ -192,8 +200,6 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
     engine.remainingSeconds <= 10 &&
     engine.remainingSeconds > 0;
   const isRestPhase = engine.phase === 'rest';
-  const isRestCritical = isRestPhase && isCriticalCountdown;
-  const isWorkCritical = engine.phase === 'work' && isCriticalCountdown;
 
   const phaseProgress = useMemo(() => {
     if (engine.phaseDurationSeconds <= 0) {
@@ -246,16 +252,20 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
     const count = rounds.length;
     const currentIndex = engine.currentRound - 1;
     const nextWorkSeconds = rounds[engine.currentRound]?.workSeconds ?? 0;
+    const nextRound = rounds[engine.currentRound];
+    const nextWorkLabel = nextRound?.label
+      ? `${nextRound.label} (${formatSecondsToClock(nextWorkSeconds)})`
+      : `Round ${engine.currentRound + 1} - Work (${formatSecondsToClock(nextWorkSeconds)})`;
 
     if (engine.phase === 'work') {
       const restSeconds = rounds[currentIndex]?.restSeconds ?? 0;
       if (restSeconds > 0) return `UP NEXT: Rest (${formatSecondsToClock(restSeconds)})`;
       if (engine.currentRound >= count) return 'UP NEXT: Finish';
-      return `UP NEXT: Round ${engine.currentRound + 1} - Work (${formatSecondsToClock(nextWorkSeconds)})`;
+      return `UP NEXT: ${nextWorkLabel}`;
     }
     if (engine.phase === 'rest') {
       if (engine.currentRound >= count) return 'UP NEXT: Finish';
-      return `UP NEXT: Round ${engine.currentRound + 1} - Work (${formatSecondsToClock(nextWorkSeconds)})`;
+      return `UP NEXT: ${nextWorkLabel}`;
     }
     return null;
   }, [engine.currentRound, engine.phase, engine.status, rounds, session]);
@@ -287,119 +297,43 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
   const showRepeat = engine.status === 'finished';
   const showSkipRound = (engine.status === 'running' || engine.status === 'paused') && engine.phase === 'work';
   const showSkipRest = (engine.status === 'running' || engine.status === 'paused') && engine.phase === 'rest';
-
-  const lightModeBase = [theme.colors.background, '#EEF3FA', '#E8EEF7'] as const;
-  const lightModeRest = ['#F2FAF6', '#E5F5EE', '#D8EFE6'] as const;
-  const lightModeWorkCritical = ['#FFF3F4', '#FFE6EA', '#FFD6DD'] as const;
-  const lightModeRestCritical = ['#F0FBF6', '#DFF6EA', '#CFEFDB'] as const;
-
-  const gradientColors = theme.isDark
-    ? isRestCritical
-      ? ['#0D2D1F', '#114530', '#1B5D43']
-      : isWorkCritical
-        ? ['#2D1017', '#3A121C', '#591A27']
-        : isRestPhase
-          ? ['#0C111D', '#10261E', '#17382B']
-          : [theme.colors.background, '#111827', '#172033']
-    : isRestCritical
-      ? [...lightModeRestCritical]
-      : isWorkCritical
-        ? [...lightModeWorkCritical]
-        : isRestPhase
-          ? [...lightModeRest]
-          : [...lightModeBase];
-
-  const controlBtnStyle = { minHeight: 58 };
-  const phaseAccent = isRestPhase ? theme.colors.success : isWorkCritical ? theme.colors.danger : theme.colors.primary;
-
+  const counterRoundInfo =
+    currentRoundInfo ??
+    rounds[Math.min(engine.currentRound, rounds.length) - 1] ??
+    null;
+  const currentGroupRound = counterRoundInfo?.groupRound;
+  const currentGroupRoundCount = counterRoundInfo?.groupRoundCount;
+  const headerRoundText =
+    currentGroupRound && currentGroupRoundCount
+      ? `${currentGroupRound} / ${currentGroupRoundCount}`
+      : `${Math.min(engine.currentRound, rounds.length)} / ${rounds.length}`;
+  const timerRoundLabel =
+    currentGroupRound && currentGroupRoundCount
+      ? `Round ${currentGroupRound} / ${currentGroupRoundCount}${
+          counterRoundInfo.partnerCount && counterRoundInfo.partnerCount > 1
+            ? ` · Partner ${counterRoundInfo.partnerPosition} / ${counterRoundInfo.partnerCount}`
+            : ''
+        }`
+      : `Round ${Math.min(engine.currentRound, rounds.length)} / ${rounds.length}`;
   return (
-    <div
+    <main
       className="app-shell session-run-shell"
-      style={{
-        background: toGradient(gradientColors),
-        padding: '42px 14px 18px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        flex: 1,
-        height: '100dvh',
-        minHeight: '100dvh',
-        overflowY: 'auto',
-        WebkitOverflowScrolling: 'touch',
-      }}
+      data-phase={engine.phase}
+      data-critical={isCriticalCountdown}
     >
-      <div
-        className="session-run-header"
-        style={{
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.card,
-          borderRadius: 8,
-          padding: 14,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          boxShadow: theme.isDark ? 'none' : '0 12px 30px rgba(17, 24, 39, 0.06)',
-        }}
-      >
-        <PrimaryButton label="Back" variant="secondary" size="sm" onPress={handleBack} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 900,
-              letterSpacing: 1.1,
-              color: phaseAccent,
-            }}
-          >
+      <header className="session-run-header">
+        <IconButton ariaLabel="Back" icon={<ArrowLeftIcon />} onPress={handleBack} />
+        <div className="session-run-header__copy">
+          <div className="session-run-header__status">
             LIVE SESSION
           </div>
-          <div
-            style={{
-              marginTop: 2,
-              fontSize: 20,
-              fontWeight: 950,
-              color: theme.colors.text,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {session.name}
-          </div>
+          <div className="session-run-header__name">{session.name}</div>
         </div>
-        <span
-          style={{
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: roundColor(engine.currentRound),
-            borderRadius: 999,
-            padding: '7px 10px',
-            backgroundColor: `${roundColor(engine.currentRound)}1F`,
-            fontSize: 12,
-            fontWeight: 900,
-            color: roundColor(engine.currentRound),
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {Math.min(engine.currentRound, session.rounds)} / {session.rounds}
-        </span>
-      </div>
+        <span className="session-run-header__round">{headerRoundText}</span>
+      </header>
 
-      <div
-        className="session-run-content"
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 14,
-          padding: '18px 0',
-        }}
-      >
-        <div className="session-run-rounds" style={{ width: '100%', maxWidth: 388, flex: '0 0 auto' }}>
+      <section className="session-run-content">
+        <div className="session-run-rounds">
           <RoundTiles
             rounds={rounds}
             currentRound={engine.currentRound}
@@ -409,118 +343,81 @@ export const SessionRunScreen = ({ route, navigation }: ScreenProps<'SessionRun'
         <TimerDisplay
           phase={engine.phase}
           remainingSeconds={engine.remainingSeconds}
-          roundLabel={`Round ${Math.min(engine.currentRound, rounds.length)} / ${rounds.length}`}
+          roundLabel={timerRoundLabel}
           isCritical={isCriticalCountdown}
           phaseProgress={phaseProgress}
           criticalColor={isRestPhase ? '#2FB874' : '#F05454'}
           restColor="#2FB874"
         />
         {currentRoundInfo?.label ? (
-          <div
-            className="session-run-round-label"
-            style={{
-              textAlign: 'center',
-              fontSize: 17,
-              fontWeight: 900,
-              letterSpacing: 0.4,
-              color: phaseAccent,
-            }}
-          >
+          <div className="session-run-round-label">
             {currentRoundInfo.label}
           </div>
         ) : null}
         {roundNotes.length > 0 ? (
-          <div
-            className="session-run-round-description"
-            style={{
-              width: '100%',
-              maxWidth: 388,
-              padding: '0 8px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
+          <div className="session-run-round-description">
             {roundNotes.map((note, index) => (
-              <div
-                key={'name' in note ? note.name : index}
-                style={{
-                  textAlign: 'center',
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: theme.colors.textMuted,
-                }}
-              >
+              <div key={'name' in note ? note.name : index}>
                 {'name' in note ? (
-                  <span style={{ fontWeight: 900, color: theme.colors.text }}>{note.name}: </span>
+                  <strong>{note.name}: </strong>
                 ) : null}
                 <span>{note.description}</span>
               </div>
             ))}
           </div>
         ) : null}
-      </div>
+      </section>
 
-      <div
-        className="session-run-controls"
-        style={{
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.card,
-          borderRadius: 8,
-          padding: 14,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-          boxShadow: theme.isDark ? 'none' : '0 12px 30px rgba(17, 24, 39, 0.08)',
-        }}
-      >
+      <footer className="session-run-controls">
         {nextPhaseText ? (
-          <div
-            className="session-run-next"
-            style={{
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: theme.colors.border,
-              borderRadius: 8,
-              backgroundColor: theme.colors.surface,
-              padding: '11px 12px',
-              textAlign: 'center',
-              fontSize: 13,
-              fontWeight: 900,
-              letterSpacing: 0.6,
-              color: theme.colors.textMuted,
-            }}
-          >
-            {nextPhaseText}
-          </div>
+          <div className="session-run-next">{nextPhaseText}</div>
         ) : null}
 
-        <div className="session-run-actions" style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 10 }}>
-          <PrimaryButton label="Stop" variant="secondary" onPress={engine.reset} style={controlBtnStyle} />
+        <div className="session-run-actions">
+          <PrimaryButton
+            label="Stop"
+            icon={<StopIcon />}
+            variant="secondary"
+            onPress={engine.reset}
+          />
           {showStart ? (
-            <PrimaryButton label="Start" onPress={engine.start} size="lg" style={controlBtnStyle} />
+            <PrimaryButton label="Start" icon={<PlayIcon />} onPress={engine.start} size="lg" />
           ) : null}
           {showPause ? (
-            <PrimaryButton label="Pause" onPress={engine.pause} size="lg" style={controlBtnStyle} />
+            <PrimaryButton label="Pause" icon={<PauseIcon />} onPress={engine.pause} size="lg" />
           ) : null}
           {showResume ? (
-            <PrimaryButton label="Resume" onPress={engine.resume} size="lg" style={controlBtnStyle} />
+            <PrimaryButton label="Resume" icon={<PlayIcon />} onPress={engine.resume} size="lg" />
           ) : null}
           {showRepeat ? (
-            <PrimaryButton label="Repeat" onPress={engine.repeat} size="lg" style={controlBtnStyle} />
+            <PrimaryButton
+              label="Repeat"
+              icon={<RepeatIcon />}
+              onPress={engine.repeat}
+              size="lg"
+            />
           ) : null}
         </div>
 
         {showSkipRound ? (
-          <PrimaryButton label="Skip round to 3s" variant="secondary" onPress={engine.skipRound} />
+          <PrimaryButton
+            label="Skip round to 3s"
+            icon={<SkipForwardIcon />}
+            className="session-run-skip"
+            variant="secondary"
+            onPress={engine.skipRound}
+          />
         ) : null}
         {showSkipRest ? (
-          <PrimaryButton label="Skip rest to 3s" variant="secondary" onPress={engine.skipRest} />
+          <PrimaryButton
+            label="Skip rest to 3s"
+            icon={<SkipForwardIcon />}
+            className="session-run-skip"
+            variant="secondary"
+            onPress={engine.skipRest}
+          />
         ) : null}
-      </div>
-    </div>
+      </footer>
+    </main>
   );
 };

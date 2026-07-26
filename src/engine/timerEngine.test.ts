@@ -249,27 +249,54 @@ describe('buildAudioTimeline', () => {
     expect(buildAudioTimeline(finished, twoRounds)).toEqual([]);
   });
 
-  it('enumerates a gong per phase and ticks for the final seconds', () => {
+  it('enumerates a gong per phase and a countdown cue for each work phase, cut off at its own end', () => {
     const running = startTimer(createInitialSnapshot(twoRounds), twoRounds, 0).snapshot;
     const cues = buildAudioTimeline(running, twoRounds);
 
     const gongs = cues.filter((c) => c.kind === 'gong').map((c) => c.atMs);
-    const ticks = cues.filter((c) => c.kind === 'tick').map((c) => c.atMs);
+    const countdowns = cues
+      .filter((c) => c.kind === 'countdown')
+      .map((c) => ({ atMs: c.atMs, stopAtMs: c.stopAtMs }));
 
     // Gong at the start of work R1 (0), rest R1 (3000), work R2 (5000).
     expect(gongs).toEqual([0, 3000, 5000]);
-    // Ticks for the last 3s of work phases and last 2s of the rest phase.
-    expect(ticks).toEqual([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]);
+    // One countdown per work phase only, covering all of the (shorter-than-10s)
+    // phase and cut off exactly at that phase's own end — rest phases use the
+    // per-second tick countdown instead (see next test).
+    expect(countdowns).toEqual([
+      { atMs: 0, stopAtMs: 3000 },
+      { atMs: 5000, stopAtMs: 8000 },
+    ]);
   });
 
-  it('caps ticks to the trailing lastSeconds window', () => {
+  it('ticks each second of the final lastSeconds window of a rest phase', () => {
+    const running = startTimer(createInitialSnapshot(twoRounds), twoRounds, 0).snapshot;
+    const cues = buildAudioTimeline(running, twoRounds);
+
+    // Rest R1 runs 3000 -> 5000 (2s, shorter than lastSeconds): a tick on each
+    // of its 2 whole seconds, not the work-phase countdown melody.
+    const restTicks = cues.filter((c) => c.kind === 'tick').map((c) => c.atMs);
+    expect(restTicks).toEqual([3000, 4000]);
+  });
+
+  it('caps the countdown to the trailing lastSeconds window', () => {
     const cfg = config([{ workSeconds: 60, restSeconds: 0 }]);
     const running = startTimer(createInitialSnapshot(cfg), cfg, 0).snapshot;
     const cues = buildAudioTimeline(running, cfg, 10);
-    const ticks = cues.filter((c: AudioCue) => c.kind === 'tick');
-    expect(ticks).toHaveLength(10);
-    // First tick lands at duration - 10 = 50s.
-    expect(ticks[0].atMs).toBe(50000);
+    const countdowns = cues.filter((c: AudioCue) => c.kind === 'countdown');
+    expect(countdowns).toHaveLength(1);
+    // Starts at duration - 10 = 50s, cut off at the phase's own end (60s).
+    expect(countdowns[0].atMs).toBe(50000);
+    expect(countdowns[0].stopAtMs).toBe(60000);
+  });
+
+  it('caps the rest tick countdown to the trailing lastSeconds window', () => {
+    const cfg = config([{ workSeconds: 3, restSeconds: 60 }, { workSeconds: 3, restSeconds: 0 }]);
+    const running = startTimer(createInitialSnapshot(cfg), cfg, 0).snapshot;
+    const cues = buildAudioTimeline(running, cfg, 10);
+    const restTicks = cues.filter((c) => c.kind === 'tick').map((c) => c.atMs);
+    // Rest runs 3000 -> 63000; ticks cover only the trailing 10s (53000..62000).
+    expect(restTicks).toEqual([53000, 54000, 55000, 56000, 57000, 58000, 59000, 60000, 61000, 62000]);
   });
 
   it('honours an absolute phase start anchor', () => {
@@ -332,17 +359,17 @@ describe('buildAudioTimeline — warnings & long sessions', () => {
     Array.from({ length: 5 }, () => ({ workSeconds: 60, restSeconds: 0 })),
   );
 
-  it('keeps a full 10-second countdown on every round, not just the first', () => {
+  it('keeps a full 10-second countdown cue on every round, not just the first', () => {
     const running = startTimer(createInitialSnapshot(longConfig), longConfig, 0).snapshot;
     const cues = buildAudioTimeline(running, longConfig);
-    const ticks = cues.filter((c) => c.kind === 'tick');
+    const countdowns = cues.filter((c) => c.kind === 'countdown');
 
-    // 5 rounds × 10 trailing ticks.
-    expect(ticks).toHaveLength(50);
-    // Round 5 starts at 4×60s = 240s and still has its 10 ticks.
-    const lastRoundTicks = ticks.filter((c) => c.atMs >= 240000);
-    expect(lastRoundTicks).toHaveLength(10);
-    expect(lastRoundTicks[0].atMs).toBe(290000); // 240s + (60-10)
+    // One countdown cue per round.
+    expect(countdowns).toHaveLength(5);
+    // Round 5 starts at 4×60s = 240s and still gets its own countdown cue.
+    const lastRoundCountdown = countdowns.find((c) => c.atMs >= 240000);
+    expect(lastRoundCountdown?.atMs).toBe(290000); // 240s + (60-10)
+    expect(lastRoundCountdown?.stopAtMs).toBe(300000);
   });
 
   it('adds a single 30s warning before each work round end', () => {

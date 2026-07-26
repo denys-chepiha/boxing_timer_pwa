@@ -82,6 +82,17 @@ describe('useRunAudio', () => {
     expect(ctx().sources[0].connected).toBe(true);
   });
 
+  it('schedules a countdown cue and cuts it off at the phase-end time', async () => {
+    const getTimeline = (): AudioCue[] => [
+      { atMs: Date.now() + 1000, kind: 'countdown', stopAtMs: Date.now() + 3000 },
+    ];
+    renderHook(() => useRunAudio(baseProps({ getTimeline })));
+    await unlock();
+    await waitFor(() => expect(ctx().sources.length).toBe(1));
+    expect(ctx().sources[0].connected).toBe(true);
+    expect(ctx().sources[0].stopped).toBe(true);
+  });
+
   it('skips cues that are already in the past', async () => {
     const getTimeline = (): AudioCue[] => [
       { atMs: Date.now() - 10000, kind: 'gong' }, // well past → skipped

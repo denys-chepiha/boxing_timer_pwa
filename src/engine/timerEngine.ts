@@ -321,10 +321,17 @@ export type AudioCue = {
    * - `gong`: phase start (work / rest)
    * - `warn`: a single warning ~`warnSeconds` before a work round ends
    * - `restWarn`: a single warning ~`warnSeconds` before a rest phase ends
-   * - `tick`: one of the final whole-second countdown beats
+   * - `tick`: one of the prep countdown's whole-second beats, or one of the
+   *   final whole-second beats of a rest phase
+   * - `countdown`: the final-`lastSeconds` melody of a work phase
    * - `complete`: the session-finished melody
    */
-  kind: 'gong' | 'warn' | 'restWarn' | 'tick' | 'complete';
+  kind: 'gong' | 'warn' | 'restWarn' | 'tick' | 'countdown' | 'complete';
+  /**
+   * `countdown` only: the phase's own end time (ms) — playback is cut off
+   * here even if the clip runs longer than the phase's trailing window.
+   */
+  stopAtMs?: number;
 };
 
 /** Jumps straight to the start of a given (1-based) round, going through prep. */
@@ -402,8 +409,17 @@ export const buildAudioTimeline = (
         cues.push({ atMs: cursor + (dur - warnSeconds) * 1000, kind });
       }
       const maxMark = Math.min(lastSeconds, Math.floor(dur));
-      for (let mark = maxMark; mark >= 1; mark -= 1) {
-        cues.push({ atMs: cursor + (dur - mark) * 1000, kind: 'tick' });
+      const phaseEndMs = cursor + dur * 1000;
+      if (snap.phase === 'work') {
+        // The countdown melody covers the final `lastSeconds` of a work phase
+        // (or the whole phase, if shorter) and is cut off at the phase's own
+        // end — it never bleeds into the next gong.
+        cues.push({ atMs: phaseEndMs - maxMark * 1000, kind: 'countdown', stopAtMs: phaseEndMs });
+      } else {
+        // Rest keeps the classic per-second tick countdown into the next round.
+        for (let mark = maxMark; mark >= 1; mark -= 1) {
+          cues.push({ atMs: phaseEndMs - mark * 1000, kind: 'tick' });
+        }
       }
     } else if (snap.phase === 'prep' && dur > 0) {
       // A tick on each whole second of the prep countdown.

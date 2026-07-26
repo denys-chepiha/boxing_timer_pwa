@@ -10,9 +10,12 @@ import { SettingsScreen } from '@/screens/SettingsScreen';
 // Storage
 import { runStateStorage } from '@/storage/runStateStorage';
 
+// Types
+import type { SessionCategory } from '@/types/models';
+
 export type RootStackParamList = {
   SessionsList: undefined;
-  SessionEditor: { sessionId?: string } | undefined;
+  SessionEditor: { sessionId?: string; category?: SessionCategory } | undefined;
   SessionRun: { sessionId: string; restored?: boolean };
   Settings: undefined;
 };

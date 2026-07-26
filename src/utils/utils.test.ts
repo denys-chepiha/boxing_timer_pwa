@@ -131,11 +131,27 @@ describe('resolveRounds', () => {
     expect(rounds.every((round) => round.description === 'Jab-cross combos')).toBe(true);
   });
 
-  it('resolves one round per participant, labelled by name, overriding rounds/roundsConfig', () => {
+  it("prefers each round's own description, falling back to the session description", () => {
+    const rounds = resolveRounds({
+      rounds: 1,
+      workSeconds: 1,
+      restSeconds: 1,
+      description: 'Session default',
+      roundsConfig: [
+        { workSeconds: 60, restSeconds: 30, description: 'Round-specific instructions' },
+        { workSeconds: 60, restSeconds: 30 },
+      ],
+    });
+    expect(rounds[0].description).toBe('Round-specific instructions');
+    expect(rounds[1].description).toBe('Session default');
+  });
+
+  it('resolves one turn per single-partner group round, overriding rounds/roundsConfig', () => {
     const rounds = resolveRounds({
       rounds: 99,
       workSeconds: 180,
       restSeconds: 60,
+      trainingMode: 'group',
       description: 'Default drill',
       roundsConfig: [{ workSeconds: 1, restSeconds: 1 }],
       participants: [
@@ -151,6 +167,10 @@ describe('resolveRounds', () => {
         label: 'Denys',
         description: 'Default drill',
         entrants: [{ name: 'Denys', description: 'Default drill' }],
+        groupRound: 1,
+        groupRoundCount: 3,
+        partnerPosition: 1,
+        partnerCount: 1,
       },
       {
         workSeconds: 180,
@@ -158,6 +178,10 @@ describe('resolveRounds', () => {
         label: 'Vlad',
         description: 'Default drill',
         entrants: [{ name: 'Vlad', description: 'Default drill' }],
+        groupRound: 2,
+        groupRoundCount: 3,
+        partnerPosition: 1,
+        partnerCount: 1,
       },
       {
         workSeconds: 180,
@@ -165,6 +189,10 @@ describe('resolveRounds', () => {
         label: 'Piter',
         description: 'Default drill',
         entrants: [{ name: 'Piter', description: 'Default drill' }],
+        groupRound: 3,
+        groupRoundCount: 3,
+        partnerPosition: 1,
+        partnerCount: 1,
       },
     ]);
   });
@@ -174,6 +202,7 @@ describe('resolveRounds', () => {
       rounds: 1,
       workSeconds: 180,
       restSeconds: 60,
+      trainingMode: 'group',
       description: 'Default drill',
       participants: [
         { id: 'p1', entrants: [{ name: 'Denys' }], workSeconds: 120, restSeconds: 45, description: 'Mitts' },
@@ -187,6 +216,10 @@ describe('resolveRounds', () => {
         label: 'Denys',
         description: 'Mitts',
         entrants: [{ name: 'Denys', description: 'Mitts' }],
+        groupRound: 1,
+        groupRoundCount: 2,
+        partnerPosition: 1,
+        partnerCount: 1,
       },
       {
         workSeconds: 180,
@@ -194,15 +227,20 @@ describe('resolveRounds', () => {
         label: 'Vlad',
         description: 'Default drill',
         entrants: [{ name: 'Vlad', description: 'Default drill' }],
+        groupRound: 2,
+        groupRoundCount: 2,
+        partnerPosition: 1,
+        partnerCount: 1,
       },
     ]);
   });
 
-  it('labels a pair round by joining every name sharing that round', () => {
+  it('keeps pair partners together under one shared clock', () => {
     const rounds = resolveRounds({
       rounds: 1,
       workSeconds: 90,
       restSeconds: 30,
+      trainingMode: 'pair',
       participants: [{ id: 'p1', entrants: [{ name: 'Denys' }, { name: 'Vlad' }] }],
     });
     expect(rounds[0].label).toBe('Denys & Vlad');
@@ -214,6 +252,7 @@ describe('resolveRounds', () => {
       workSeconds: 180,
       restSeconds: 60,
       description: 'Default drill',
+      trainingMode: 'pair',
       participants: [
         {
           id: 'p1',
@@ -226,6 +265,87 @@ describe('resolveRounds', () => {
       { name: 'Denys', description: '1-1-2' },
       { name: 'Vlad', description: '1-2' },
     ]);
+  });
+
+  it('runs Group Training partners sequentially with inherited and overridden settings', () => {
+    const rounds = resolveRounds({
+      rounds: 2,
+      workSeconds: 180,
+      restSeconds: 60,
+      trainingMode: 'group',
+      participants: [
+        {
+          id: 'p1',
+          restSeconds: 45,
+          entrants: [
+            {
+              name: 'Denys',
+              workSeconds: 90,
+              restSeconds: 15,
+              description: 'Jab-cross',
+            },
+            { name: 'Vlad', workSeconds: 120, description: 'Mitts' },
+          ],
+        },
+        {
+          id: 'p2',
+          entrants: [{ name: 'Piter', workSeconds: 75, description: 'Footwork' }],
+        },
+      ],
+    });
+
+    expect(rounds).toEqual([
+      expect.objectContaining({
+        label: 'Denys',
+        description: 'Jab-cross',
+        workSeconds: 90,
+        restSeconds: 15,
+        groupRound: 1,
+        partnerPosition: 1,
+        partnerCount: 2,
+      }),
+      expect.objectContaining({
+        label: 'Vlad',
+        description: 'Mitts',
+        workSeconds: 120,
+        restSeconds: 45,
+        groupRound: 1,
+        partnerPosition: 2,
+        partnerCount: 2,
+      }),
+      expect.objectContaining({
+        label: 'Piter',
+        description: 'Footwork',
+        workSeconds: 75,
+        restSeconds: 0,
+        groupRound: 2,
+        partnerPosition: 1,
+        partnerCount: 1,
+      }),
+    ]);
+  });
+
+  it('drops every partner rest override from the final Group Training round', () => {
+    const rounds = resolveRounds({
+      rounds: 1,
+      workSeconds: 180,
+      restSeconds: 60,
+      trainingMode: 'group',
+      participants: [
+        {
+          id: 'p1',
+          workSeconds: 120,
+          restSeconds: 45,
+          description: 'Final drill',
+          entrants: [
+            { name: 'Denys', restSeconds: 15 },
+            { name: 'Vlad', restSeconds: 30 },
+          ],
+        },
+      ],
+    });
+
+    expect(rounds.map((round) => round.restSeconds)).toEqual([0, 0]);
   });
 });
 

@@ -1,0 +1,142 @@
+.partner-config-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-backdrop);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: var(--color-overlay);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 170ms ease;
+}
+
+.partner-config-backdrop.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.partner-config-sheet {
+  display: flex;
+  width: 100%;
+  max-width: 520px;
+  max-height: min(82dvh, 680px);
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 16px max(16px, env(safe-area-inset-bottom));
+  border: 1px solid var(--color-border);
+  border-bottom: 0;
+  border-radius: 26px 26px 0 0;
+  background: var(--color-card);
+  box-shadow: 0 -14px 54px rgb(0 0 0 / 18%);
+  transform: translate3d(0, 100%, 0);
+  transition: transform 240ms var(--ease-drawer);
+  will-change: transform;
+}
+
+.partner-config-sheet.is-visible {
+  transform: translate3d(0, 0, 0);
+}
+
+.partner-config-handle {
+  width: 38px;
+  height: 4px;
+  margin: 1px auto 2px;
+  border-radius: 999px;
+  background: var(--color-border-strong);
+}
+
+.partner-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.partner-config-heading {
+  min-width: 0;
+}
+
+.partner-config-caption {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 620;
+}
+
+.partner-config-title {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 1.25rem;
+  font-weight: 820;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partner-config-inheritance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 12px;
+  border-block: 1px solid var(--color-border);
+}
+
+.partner-config-inheritance > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.partner-config-inheritance strong {
+  color: var(--color-text);
+  font-size: 0.875rem;
+  font-weight: 760;
+}
+
+.partner-config-inheritance span {
+  max-width: 42ch;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 560;
+  line-height: 1.4;
+}
+
+.partner-config-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.partner-config-times[data-single='true'] {
+  grid-template-columns: 1fr;
+}
+
+.optional-label {
+  color: var(--color-text-muted);
+  font-weight: 560;
+}
+
+@media (max-width: 380px) {
+  .partner-config-inheritance {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .partner-config-backdrop {
+    transition: opacity 140ms ease;
+  }
+
+  .partner-config-sheet,
+  .partner-config-sheet.is-visible {
+    transform: none;
+    transition: none;
+  }
+}

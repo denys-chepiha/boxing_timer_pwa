@@ -82,6 +82,11 @@ beforeEach(() => {
     writable: true,
     value: vi.fn(() => true),
   });
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    writable: true,
+    value: { writeText: vi.fn().mockResolvedValue(undefined) },
+  });
 });
 
 // --- Web Audio mock ------------------------------------------------------

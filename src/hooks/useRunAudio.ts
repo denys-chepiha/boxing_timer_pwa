@@ -84,6 +84,7 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
   const tickBufferRef = useRef<AudioBuffer | null>(null);
   const warnBufferRef = useRef<AudioBuffer | null>(null);
   const restWarnBufferRef = useRef<AudioBuffer | null>(null);
+  const countdownBufferRef = useRef<AudioBuffer | null>(null);
   const completeBufferRef = useRef<AudioBuffer | null>(null);
   const gongCacheRef = useRef<Map<SoundId, AudioBuffer>>(new Map());
   const keepAliveElRef = useRef<HTMLAudioElement | null>(null);
@@ -168,6 +169,18 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
 
     void (async () => {
       try {
+        const response = await fetch(`${base}sounds/final-countdown.mp3`);
+        const decoded = await ctx.decodeAudioData(await response.arrayBuffer());
+        if (!cancelled) {
+          countdownBufferRef.current = decoded;
+        }
+      } catch {
+        // Best-effort — falls back to ticks (below) if this clip fails to load.
+      }
+    })();
+
+    void (async () => {
+      try {
         const response = await fetch(`${base}sounds/complete_training.mp3`);
         const decoded = await ctx.decodeAudioData(await response.arrayBuffer());
         if (!cancelled) {
@@ -203,6 +216,7 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
       tickBufferRef.current = null;
       warnBufferRef.current = null;
       restWarnBufferRef.current = null;
+      countdownBufferRef.current = null;
       completeBufferRef.current = null;
       gongCacheRef.current.clear();
       keepAliveElRef.current = null;
@@ -321,6 +335,8 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
     // The 30s warnings fall back to the gong sample if their own clip is missing.
     const warnBuffer = warnBufferRef.current ?? gongBuffer;
     const restWarnBuffer = restWarnBufferRef.current ?? gongBuffer;
+    // The final-countdown melody falls back to the plain tick if its own clip is missing.
+    const countdownBuffer = countdownBufferRef.current ?? tickBuffer;
 
     cues.forEach((cue) => {
       const offsetSec = (cue.atMs - now) / 1000;
@@ -338,7 +354,9 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
               ? restWarnBuffer
               : cue.kind === 'complete'
                 ? completeBuffer
-                : tickBuffer;
+                : cue.kind === 'countdown'
+                  ? countdownBuffer
+                  : tickBuffer;
       if (!buffer) {
         return;
       }
@@ -356,6 +374,15 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
       source.onended = () => source.disconnect();
       const startTime = ctx.currentTime + Math.max(0, offsetSec);
       source.start(startTime);
+      // A countdown clip is always cut off at its phase's own end — whether it
+      // naturally runs long (untrimmed source) or the phase itself is shorter
+      // than the clip (a short round only gets the clip's opening seconds).
+      if (cue.kind === 'countdown' && cue.stopAtMs !== undefined) {
+        const stopTime = ctx.currentTime + Math.max(0, (cue.stopAtMs - now) / 1000);
+        if (stopTime > startTime) {
+          source.stop(stopTime);
+        }
+      }
       scheduledRef.current.push({ source, startTime });
     });
 

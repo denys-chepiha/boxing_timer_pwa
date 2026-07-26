@@ -115,10 +115,11 @@ describe('sessionsStorage', () => {
   it('round-trips participants and a description', async () => {
     const session = sampleSession({
       description: 'Heavy bag combos',
+      trainingMode: 'group',
       participants: [
         {
           id: 'p1',
-          entrants: [{ name: 'Denys' }],
+          entrants: [{ name: 'Denys', workSeconds: 90, restSeconds: 15 }],
           workSeconds: 120,
           restSeconds: 45,
           description: 'Mitts',
@@ -154,6 +155,33 @@ describe('sessionsStorage', () => {
     expect(loaded.participants).toEqual([
       { id: 'p1', entrants: [{ name: '  Denys  ' }], workSeconds: 12, restSeconds: 0 },
       { id: 'p2', entrants: [{ name: 'Vlad' }] },
+    ]);
+  });
+
+  it('sanitises partner work/rest time and the persisted training mode', async () => {
+    await localStore.setItem(
+      'box_timer_sessions_v1',
+      JSON.stringify([
+        sampleSession({
+          trainingMode: 'group',
+          participants: [
+            {
+              id: 'p1',
+              entrants: [
+                { name: 'Denys', workSeconds: 90.9, restSeconds: 15.9 },
+                { name: 'Vlad', workSeconds: 0, restSeconds: -3 },
+              ],
+            },
+          ],
+        }),
+      ]),
+    );
+
+    const [loaded] = await sessionsStorage.getAll();
+    expect(loaded.trainingMode).toBe('group');
+    expect(loaded.participants?.[0].entrants).toEqual([
+      { name: 'Denys', workSeconds: 90, restSeconds: 15 },
+      { name: 'Vlad', workSeconds: 1, restSeconds: 0 },
     ]);
   });
 

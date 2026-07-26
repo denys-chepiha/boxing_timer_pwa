@@ -1,5 +1,5 @@
 // Core
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // Navigation
@@ -15,6 +15,8 @@ import { sessionsStorage } from '@/storage/sessionsStorage';
 import { settingsStorage } from '@/storage/settingsStorage';
 // Test
 import { makeSession, renderWithProviders } from '@/test/utils';
+// Utils
+import { resolveRounds } from '@/utils/rounds';
 
 const fakeNav = () => ({ navigate: vi.fn(), goBack: vi.fn() });
 
@@ -64,12 +66,55 @@ describe('SessionEditorScreen', () => {
     expect(saved[0]).toMatchObject({ name: 'My Workout', rounds: 3, roundsConfig: undefined });
   });
 
+  it('defaults to Same for all and opens the training type sheet from the Type button', async () => {
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    expect(screen.getByRole('button', { name: 'Type' })).toHaveTextContent('Same for all');
+    expect(screen.getByText('Rounds')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    const dialog = screen.getByRole('dialog', { name: 'Training type' });
+    expect(dialog.parentElement).toBe(document.body);
+    expect(within(dialog).getByRole('button', { name: 'Same for all' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(within(dialog).getByRole('button', { name: 'Per round' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Group Training' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Pair Training' })).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Per round' }));
+
+    expect(screen.getByRole('button', { name: 'Type' })).toHaveTextContent('Per round');
+    expect(screen.getByText('Rounds (3)')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Training type' })).not.toBeInTheDocument(),
+    );
+  });
+
+  it('closes the training type sheet without changing the mode when the backdrop is clicked', async () => {
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('dialog', { name: 'Training type' }));
+
+    expect(screen.getByRole('button', { name: 'Type' })).toHaveTextContent('Same for all');
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Training type' })).not.toBeInTheDocument(),
+    );
+  });
+
   it('supports per-round timing with add / remove', async () => {
     const user = userEvent.setup();
     const nav = fakeNav();
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
     await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Intervals');
+    await user.click(screen.getByRole('button', { name: 'Type' }));
     await user.click(screen.getByRole('button', { name: 'Per round' }));
 
     // Default seeds 3 rounds; add one, then remove one → back to 3.
@@ -83,6 +128,121 @@ describe('SessionEditorScreen', () => {
     await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
     const [saved] = await sessionsStorage.getAll();
     expect(saved.roundsConfig).toHaveLength(3);
+  });
+
+  it('drops the rest control from only the last round in Per round mode', async () => {
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    const { container } = renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Per round' }));
+
+    const rounds = Array.from(container.querySelectorAll<HTMLElement>('.round-config'));
+    expect(rounds).toHaveLength(3);
+    expect(within(rounds[0]).getByText('REST')).toBeInTheDocument();
+    expect(within(rounds[1]).getByText('REST')).toBeInTheDocument();
+    expect(within(rounds[2]).queryByText('REST')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '+ Add round' }));
+
+    const roundsAfterAdd = Array.from(container.querySelectorAll<HTMLElement>('.round-config'));
+    // The old last round gets its REST control back; only the new one hides it.
+    expect(within(roundsAfterAdd[2]).getByText('REST')).toBeInTheDocument();
+    expect(within(roundsAfterAdd[3]).queryByText('REST')).not.toBeInTheDocument();
+  });
+
+  it('always saves zero rest for the final round in Per round mode, even for legacy data', async () => {
+    await sessionsStorage.saveAll([
+      makeSession({
+        id: 'legacy-rest',
+        name: 'Legacy',
+        roundsConfig: [
+          { workSeconds: 60, restSeconds: 30 },
+          { workSeconds: 60, restSeconds: 45 }, // stale trailing rest saved before this change
+        ],
+      }),
+    ]);
+    const user = userEvent.setup();
+    const { default: App } = await import('@/app/App');
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('Legacy')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    await waitFor(() => expect(screen.getByDisplayValue('Legacy')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(sessionsStorage.getAll()).resolves.toHaveLength(1));
+    const [saved] = await sessionsStorage.getAll();
+    expect(saved.roundsConfig?.[1].restSeconds).toBe(0);
+  });
+
+  it('gives each round its own description in Per round mode, copied forward when adding a round', async () => {
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Combos by round');
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Per round' }));
+
+    // The shared Description section is gone — each round owns its own field instead.
+    expect(
+      screen.queryByText('Shown under the timer while this workout runs.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Description for round 1')).toBeInTheDocument();
+    expect(screen.getByLabelText('Description for round 2')).toBeInTheDocument();
+    expect(screen.getByLabelText('Description for round 3')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Description for round 3'), 'Jab-cross combos');
+    await user.click(screen.getByRole('button', { name: '+ Add round' }));
+
+    // A newly added round starts from the previous (last) round's description.
+    expect(screen.getByLabelText('Description for round 4')).toHaveValue('Jab-cross combos');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
+
+    const [saved] = await sessionsStorage.getAll();
+    expect(saved.description).toBeUndefined();
+    expect(saved.roundsConfig?.map((round) => round.description)).toEqual([
+      undefined,
+      undefined,
+      'Jab-cross combos',
+      'Jab-cross combos',
+    ]);
+  });
+
+  it("copies a round's description to the clipboard", async () => {
+    const user = userEvent.setup();
+    // userEvent.setup() installs its own clipboard stub, replacing the plain
+    // mock from beforeEach — spy on whatever it left behind.
+    const writeTextSpy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Per round' }));
+
+    expect(screen.getByRole('button', { name: 'Copy round 2 description' })).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Description for round 2'), 'Footwork drill');
+    await user.click(screen.getByRole('button', { name: 'Copy round 2 description' }));
+
+    expect(writeTextSpy).toHaveBeenCalledWith('Footwork drill');
+  });
+
+  it('keeps standard workout details inline under the persistent editor header', () => {
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    expect(
+      screen.getByPlaceholderText('e.g. Jab-cross-hook combos, light footwork'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'New workout' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(screen.queryByText(/Who's training/)).not.toBeInTheDocument();
   });
 
   it('saves a description shown independently of participants', async () => {
@@ -109,21 +269,40 @@ describe('SessionEditorScreen', () => {
     await user.click(screen.getByRole('option', { name }));
   };
 
-  it('adds named participants, one round per person, replacing round-count controls', async () => {
+  it('keeps Group Training inside the editor container under the same header', async () => {
     await rosterStorage.addMany(['Denys', 'Vlad']);
     const user = userEvent.setup();
     const nav = fakeNav();
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
     await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Group Circuit');
-    await user.click(screen.getByRole('button', { name: '+ Add person' }));
-    await pickName(user, 'Name 1 for round 1', 'Denys');
-    expect(screen.getByText("Who's training (1)")).toBeInTheDocument();
-    expect(screen.queryByText('Round timing')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Group Training' }));
 
-    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    // Entering the mode swaps only the configuration below the editor header.
+    expect(screen.queryByText(/Who's training/)).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Round 1 timing' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /REST/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'New workout' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Type' })).toHaveTextContent('Group Training');
+    await user.type(
+      screen.getByLabelText('Workout instructions for round 1'),
+      'Heavy bag combinations',
+    );
+    await pickName(user, 'Name 1 for round 1', 'Denys');
+
+    await user.click(screen.getByRole('button', { name: '+ Add round' }));
     await pickName(user, 'Name 1 for round 2', 'Vlad');
-    expect(screen.getByText(/Rounds: 2/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Workout instructions for round 2')).toHaveValue(
+      'Heavy bag combinations',
+    );
+    expect(screen.getByRole('group', { name: 'Round 1 timing' })).toHaveTextContent(
+      'REST',
+    );
+    expect(screen.getByRole('group', { name: 'Round 2 timing' })).not.toHaveTextContent(
+      'REST',
+    );
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
@@ -132,34 +311,63 @@ describe('SessionEditorScreen', () => {
     expect(saved.rounds).toBe(2);
     expect(saved.roundsConfig).toBeUndefined();
     expect(saved.participants).toEqual([
-      { id: expect.any(String), entrants: [{ name: 'Denys' }] },
-      { id: expect.any(String), entrants: [{ name: 'Vlad' }] },
+      expect.objectContaining({
+        id: expect.any(String),
+        entrants: [{ name: 'Denys' }],
+        workSeconds: 180,
+        restSeconds: 60,
+        description: 'Heavy bag combinations',
+      }),
+      expect.objectContaining({
+        id: expect.any(String),
+        entrants: [{ name: 'Vlad' }],
+        workSeconds: 180,
+        restSeconds: 60,
+        description: 'Heavy bag combinations',
+      }),
     ]);
+    expect(saved.trainingMode).toBe('group');
   });
 
-  it('excludes a name already used elsewhere in this session from the picker', async () => {
+  it('copies the partner into the next round and still allows changing that round', async () => {
     await rosterStorage.addMany(['Denys', 'Vlad']);
     const user = userEvent.setup();
     const nav = fakeNav();
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
-    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Group Training' }));
+    await user.type(
+      screen.getByLabelText('Workout instructions for round 1'),
+      'Partner drills',
+    );
     await pickName(user, 'Name 1 for round 1', 'Denys');
-    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.click(screen.getByRole('button', { name: '+ Add round' }));
 
     await user.click(screen.getByLabelText('Name 1 for round 2'));
     expect(screen.getByRole('option', { name: 'Vlad' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Denys' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Denys' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await user.click(screen.getByRole('option', { name: 'Vlad' }));
+    expect(screen.getByLabelText('Name 1 for round 2')).toHaveTextContent('Vlad');
+    expect(screen.getByLabelText('Name 1 for round 1')).toHaveTextContent('Denys');
   });
 
-  it('adds a second name to a round for pair training under one clock', async () => {
+  it('adds a second partner to the sequential group round', async () => {
     await rosterStorage.addMany(['Denys', 'Vlad']);
     const user = userEvent.setup();
     const nav = fakeNav();
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
-    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Pairs');
-    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Group Pair');
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Group Training' }));
+    await user.type(
+      screen.getByLabelText('Workout instructions for round 1'),
+      'Partner drills',
+    );
     await pickName(user, 'Name 1 for round 1', 'Denys');
     await user.click(screen.getByRole('button', { name: '+ Add partner' }));
     await pickName(user, 'Name 2 for round 1', 'Vlad');
@@ -170,7 +378,82 @@ describe('SessionEditorScreen', () => {
     const [saved] = await sessionsStorage.getAll();
     expect(saved.rounds).toBe(1);
     expect(saved.participants).toEqual([
-      { id: expect.any(String), entrants: [{ name: 'Denys' }, { name: 'Vlad' }] },
+      expect.objectContaining({
+        id: expect.any(String),
+        entrants: [
+          { name: 'Denys' },
+          { name: 'Vlad' },
+        ],
+        workSeconds: 180,
+        restSeconds: 60,
+        description: 'Partner drills',
+      }),
+    ]);
+  });
+
+  it('picking Pair Training seeds a round with two name slots for pair training under one clock', async () => {
+    await rosterStorage.addMany(['Denys', 'Vlad']);
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Pairs');
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Pair Training' }));
+
+    // Both slots are ready immediately — a pair never needs "+ Add partner".
+    await pickName(user, 'Name 1 for round 1', 'Denys');
+    await pickName(user, 'Name 2 for round 1', 'Vlad');
+    expect(screen.queryByRole('button', { name: '+ Add partner' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
+
+    const [saved] = await sessionsStorage.getAll();
+    expect(saved.rounds).toBe(1);
+    expect(saved.participants).toEqual([
+      expect.objectContaining({
+        id: expect.any(String),
+        entrants: [{ name: 'Denys' }, { name: 'Vlad' }],
+        workSeconds: 180,
+        restSeconds: 60,
+      }),
+    ]);
+  });
+
+  it('tops up a round left with one person when switching from Group to Pair Training', async () => {
+    await rosterStorage.addMany(['Denys', 'Vlad']);
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Switch modes');
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Group Training' }));
+    await user.type(
+      screen.getByLabelText('Workout instructions for round 1'),
+      'Round default',
+    );
+    await pickName(user, 'Name 1 for round 1', 'Denys');
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Pair Training' }));
+
+    // The round carried over from Group Training now has a second, empty slot.
+    expect(screen.getByLabelText('Name 1 for round 1')).toHaveTextContent('Denys');
+    expect(screen.getByLabelText('Name 2 for round 1')).toBeInTheDocument();
+    await pickName(user, 'Name 2 for round 1', 'Vlad');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
+
+    const [saved] = await sessionsStorage.getAll();
+    expect(saved.participants).toEqual([
+      expect.objectContaining({
+        id: expect.any(String),
+        entrants: [{ name: 'Denys' }, { name: 'Vlad' }],
+        workSeconds: 180,
+        restSeconds: 60,
+      }),
     ]);
   });
 
@@ -181,53 +464,183 @@ describe('SessionEditorScreen', () => {
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
     await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Pairs with notes');
-    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Pair Training' }));
     await pickName(user, 'Name 1 for round 1', 'Denys');
-    await user.click(screen.getByRole('button', { name: '+ Add partner' }));
     await pickName(user, 'Name 2 for round 1', 'Vlad');
 
-    // A per-partner note field only appears once a round has 2+ people.
-    await user.type(screen.getByLabelText('Note for Vlad in round 1'), '1-2');
+    await user.click(
+      screen.getByRole('button', { name: 'Configure Vlad in round 1' }),
+    );
+    const partnerDialog = screen.getByRole('dialog', {
+      name: 'Partner configuration',
+    });
+    await user.type(
+      within(partnerDialog).getByLabelText('Workout instructions'),
+      '1-2',
+    );
+    await user.click(within(partnerDialog).getByRole('button', { name: 'Done' }));
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
 
     const [saved] = await sessionsStorage.getAll();
     expect(saved.participants).toEqual([
-      {
+      expect.objectContaining({
         id: expect.any(String),
         entrants: [{ name: 'Denys' }, { name: 'Vlad', description: '1-2' }],
-      },
+        workSeconds: 180,
+        restSeconds: 60,
+      }),
     ]);
   });
 
-  it('lets a participant override timing and description, inheriting session defaults otherwise', async () => {
+  it('opens partner timing and instructions in an animated bottom sheet', async () => {
     await rosterStorage.add('Denys');
     const user = userEvent.setup();
     const nav = fakeNav();
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
     await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Overrides');
-    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Group Training' }));
+    await user.type(
+      screen.getByLabelText('Workout instructions for round 1'),
+      'Round default',
+    );
     await pickName(user, 'Name 1 for round 1', 'Denys');
-    await user.click(screen.getByRole('button', { name: 'Customize timing & description' }));
-    await user.type(screen.getByLabelText('Description for round 1'), 'Mitts');
+    expect(screen.queryByText('Customize timing & description')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Same as round instruction')).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Configure Denys in round 1' }),
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Partner configuration' });
+    expect(dialog.parentElement).toBe(document.body);
+    expect(dialog.querySelector('.partner-config-sheet')).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole('button', { name: /REST TIME/ }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      within(dialog).getByRole('button', { name: /WORK TIME/ }),
+    );
+    await user.click(screen.getByRole('button', { name: '2 minutes' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.type(
+      within(dialog).getByLabelText('Workout instructions'),
+      'Mitts',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }));
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
 
     const [saved] = await sessionsStorage.getAll();
-    // Customizing seeds the current session defaults (180/60) as this round's
-    // explicit override, on top of the typed description.
     expect(saved.participants).toEqual([
       {
         id: expect.any(String),
-        entrants: [{ name: 'Denys' }],
+        entrants: [{ name: 'Denys', workSeconds: 120, description: 'Mitts' }],
         workSeconds: 180,
         restSeconds: 60,
-        description: 'Mitts',
+        description: 'Round default',
       },
     ]);
+    expect(saved.description).toBeUndefined();
+  });
+
+  it('lets a group partner override the round rest before the final round', async () => {
+    await rosterStorage.add('Denys');
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Rest overrides');
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Group Training' }));
+    await user.type(
+      screen.getByLabelText('Workout instructions for round 1'),
+      'Bag work',
+    );
+    await pickName(user, 'Name 1 for round 1', 'Denys');
+    await user.click(screen.getByRole('button', { name: '+ Add round' }));
+
+    await user.click(
+      screen.getByRole('button', { name: 'Configure Denys in round 1' }),
+    );
+    const dialog = screen.getByRole('dialog', {
+      name: 'Partner configuration',
+    });
+    await user.click(
+      within(dialog).getByRole('button', { name: /REST TIME/ }),
+    );
+    await user.click(screen.getByRole('button', { name: '0 minutes' }));
+    await user.click(screen.getByRole('button', { name: '15 seconds' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }));
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(nav.goBack).toHaveBeenCalled());
+
+    const [saved] = await sessionsStorage.getAll();
+    expect(saved.participants?.[0].entrants[0]).toEqual({
+      name: 'Denys',
+      restSeconds: 15,
+    });
+    expect(
+      resolveRounds(saved).map((round) => round.restSeconds),
+    ).toEqual([15, 0]);
+  });
+
+  it('copies the previous round configuration when adding a round', async () => {
+    await rosterStorage.add('Denys');
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Group Training' }));
+    await user.type(
+      screen.getByLabelText('Workout instructions for round 1'),
+      'Mitts and combinations',
+    );
+    await pickName(user, 'Name 1 for round 1', 'Denys');
+
+    const firstRoundTiming = screen.getByRole('group', {
+      name: 'Round 1 timing',
+    });
+    await user.click(
+      within(firstRoundTiming).getByRole('button', { name: /WORK/ }),
+    );
+    await user.click(screen.getByRole('button', { name: '2 minutes' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await user.click(screen.getByRole('button', { name: '+ Add round' }));
+
+    expect(screen.getByLabelText('Name 1 for round 2')).toHaveTextContent('Denys');
+    expect(screen.getByLabelText('Workout instructions for round 2')).toHaveValue(
+      'Mitts and combinations',
+    );
+    expect(
+      within(screen.getByRole('group', { name: 'Round 2 timing' })).getByRole(
+        'button',
+        { name: /WORK/ },
+      ),
+    ).toHaveTextContent('02:00');
+
+    await user.click(screen.getByRole('button', { name: '+ Add round' }));
+
+    expect(screen.getByLabelText('Workout instructions for round 3')).toHaveValue(
+      'Mitts and combinations',
+    );
+    expect(
+      within(screen.getByRole('group', { name: 'Round 2 timing' })).getByRole(
+        'button',
+        { name: /REST/ },
+      ),
+    ).toHaveTextContent('01:00');
+    expect(
+      screen.getByRole('group', { name: 'Round 3 timing' }),
+    ).not.toHaveTextContent('REST');
   });
 
   it('offers a shortcut to Settings from the picker when the roster has no options left', async () => {
@@ -235,7 +648,8 @@ describe('SessionEditorScreen', () => {
     const nav = fakeNav();
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
-    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Group Training' }));
     await user.click(screen.getByLabelText('Name 1 for round 1'));
     await user.click(screen.getByRole('button', { name: 'Manage in Settings' }));
 
@@ -249,10 +663,50 @@ describe('SessionEditorScreen', () => {
     renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
 
     await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Incomplete');
-    await user.click(screen.getByRole('button', { name: '+ Add person' }));
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Group Training' }));
+    await user.type(
+      screen.getByLabelText('Workout instructions for round 1'),
+      'Required round setup',
+    );
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(alertSpy).toHaveBeenCalledWith('Every person needs a name');
+    expect(nav.goBack).not.toHaveBeenCalled();
+  });
+
+  it('blocks saving Group Training without round instructions', async () => {
+    await rosterStorage.add('Denys');
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Missing instructions');
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Group Training' }));
+    await pickName(user, 'Name 1 for round 1', 'Denys');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Add workout instructions to every group round',
+    );
+    expect(nav.goBack).not.toHaveBeenCalled();
+  });
+
+  it('blocks saving a training session with every round removed', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    const nav = fakeNav();
+    renderWithProviders(<SessionEditorScreen {...editorProps(nav)} />);
+
+    await user.type(screen.getByPlaceholderText('Heavy Bag Drill'), 'Empty');
+    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Group Training' }));
+    await user.click(screen.getByRole('button', { name: 'Remove round 1' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(alertSpy).toHaveBeenCalledWith('Add at least one round');
     expect(nav.goBack).not.toHaveBeenCalled();
   });
 
@@ -275,6 +729,47 @@ describe('SessionEditorScreen', () => {
     await waitFor(() => expect(sessionsStorage.getAll()).resolves.toHaveLength(1));
     const [saved] = await sessionsStorage.getAll();
     expect(saved.name).toBe('New Name');
+  });
+
+  it('resumes an existing group session inline under the editor header', async () => {
+    await sessionsStorage.saveAll([
+      makeSession({
+        id: 'g1',
+        name: 'Group session',
+        rounds: 2,
+        participants: [
+          {
+            id: 'p1',
+            description: 'Bag work',
+            entrants: [{ name: 'Denys' }],
+          },
+          {
+            id: 'p2',
+            description: 'Mitts',
+            entrants: [{ name: 'Vlad' }, { name: 'Piter' }],
+          },
+        ],
+      }),
+    ]);
+    const user = userEvent.setup();
+    const { default: App } = await import('@/app/App');
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('Group session')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    // Mode is inferred from the saved participants and the list remains in the
+    // same editor container rather than replacing the whole screen.
+    await waitFor(() => expect(screen.getByDisplayValue('Group session')).toBeInTheDocument());
+    expect(screen.queryByText(/Who's training/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Workout instructions for round 1')).toHaveValue(
+      'Bag work',
+    );
+    expect(screen.getByLabelText('Workout instructions for round 2')).toHaveValue(
+      'Mitts',
+    );
+    expect(screen.getByRole('heading', { name: 'Edit workout' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
   });
 });
 
@@ -366,9 +861,21 @@ describe('SessionRunScreen', () => {
         name: 'Named',
         description: 'Default drill',
         rounds: 2,
+        trainingMode: 'group',
         participants: [
-          { id: 'p1', entrants: [{ name: 'Denys' }] },
-          { id: 'p2', entrants: [{ name: 'Vlad' }, { name: 'Piter' }], description: 'Mitts' },
+          {
+            id: 'p1',
+            entrants: [
+              { name: 'Denys', workSeconds: 90, description: 'Default drill' },
+            ],
+          },
+          {
+            id: 'p2',
+            entrants: [
+              { name: 'Vlad', workSeconds: 120, description: 'Mitts' },
+              { name: 'Piter', workSeconds: 75, description: 'Footwork' },
+            ],
+          },
         ],
       }),
     ]);
@@ -384,9 +891,13 @@ describe('SessionRunScreen', () => {
     expect(currentLabel()).toBe('Denys');
     expect(currentDescription()).toBe('Default drill');
 
-    await user.click(screen.getByText('R2'));
-    expect(currentLabel()).toBe('Vlad & Piter');
+    await user.click(screen.getByText('R2 · P1'));
+    expect(currentLabel()).toBe('Vlad');
     expect(currentDescription()).toBe('Mitts');
+
+    await user.click(screen.getByText('R2 · P2'));
+    expect(currentLabel()).toBe('Piter');
+    expect(currentDescription()).toBe('Footwork');
   });
 
   it('breaks the description down per entrant when a pair round has different instructions', async () => {

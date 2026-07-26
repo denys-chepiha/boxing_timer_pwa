@@ -40,6 +40,37 @@ export const ThemeProvider = ({ children }: Props) => {
     document.body.style.backgroundColor = theme.colors.background;
     document.body.style.color = theme.colors.text;
 
+    const cssColors: Record<string, string> = {
+      '--color-bg': theme.colors.background,
+      '--color-bg-elevated': theme.colors.backgroundElevated,
+      '--color-card': theme.colors.card,
+      '--color-card-strong': theme.colors.cardStrong,
+      '--color-text': theme.colors.text,
+      '--color-text-muted': theme.colors.textMuted,
+      '--color-text-subtle': theme.colors.textSubtle,
+      '--color-primary': theme.colors.primary,
+      '--color-primary-soft': theme.colors.primarySoft,
+      '--color-primary-text': theme.colors.primaryText,
+      '--color-border': theme.colors.border,
+      '--color-border-strong': theme.colors.borderStrong,
+      '--color-danger': theme.colors.danger,
+      '--color-danger-soft': theme.colors.dangerSoft,
+      '--color-success': theme.colors.success,
+      '--color-success-soft': theme.colors.successSoft,
+      '--color-warning': theme.colors.warning,
+      '--color-warning-soft': theme.colors.warningSoft,
+      '--color-surface': theme.colors.surface,
+      '--color-surface-strong': theme.colors.surfaceStrong,
+      '--color-surface-muted': theme.colors.surfaceMuted,
+      '--color-input': theme.colors.input,
+      '--color-overlay': theme.colors.overlay,
+      '--shadow-elevated': theme.colors.shadow,
+    };
+
+    Object.entries(cssColors).forEach(([name, value]) => {
+      document.documentElement.style.setProperty(name, value);
+    });
+
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) {
       meta.setAttribute('content', theme.colors.background);

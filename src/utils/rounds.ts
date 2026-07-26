@@ -3,7 +3,13 @@ import { Entrant, Participant, RoundConfig, Session } from '@/types/models';
 
 type RoundsSource = Pick<
   Session,
-  'rounds' | 'workSeconds' | 'restSeconds' | 'roundsConfig' | 'description' | 'participants'
+  | 'rounds'
+  | 'workSeconds'
+  | 'restSeconds'
+  | 'roundsConfig'
+  | 'description'
+  | 'participants'
+  | 'trainingMode'
 >;
 
 /** An entrant with its description resolved (entrant override, else the round's, else the session's). */
@@ -18,9 +24,14 @@ export type ResolvedRound = RoundConfig & {
   description?: string;
   /** Present when the session names participants — one entry per person sharing this round. */
   entrants?: ResolvedEntrant[];
+  /** Logical Group Training round containing this partner turn. */
+  groupRound?: number;
+  groupRoundCount?: number;
+  partnerPosition?: number;
+  partnerCount?: number;
 };
 
-const resolveParticipantRounds = (
+const resolveSharedParticipantRounds = (
   participants: Participant[],
   session: Pick<RoundsSource, 'workSeconds' | 'restSeconds' | 'description'>,
 ): ResolvedRound[] => {
@@ -45,14 +56,72 @@ const resolveParticipantRounds = (
 };
 
 /**
- * Resolves a session to its concrete per-round timing. Sessions with named
- * `participants` use one round per person/pair (in order); sessions with an
- * explicit `roundsConfig` use it directly; legacy/uniform sessions expand to N
- * identical rounds with rest between them (no rest after the final round).
+ * A Group Training round is a queue: each partner receives an independent
+ * work interval, recovery, and instruction. Each value inherits from the
+ * configured round unless the partner overrides it. The final configured
+ * round never schedules recovery because the workout ends there.
+ */
+const resolveGroupRounds = (
+  participants: Participant[],
+  session: Pick<RoundsSource, 'workSeconds' | 'restSeconds' | 'description'>,
+): ResolvedRound[] => {
+  const groupRoundCount = participants.length;
+
+  return participants.flatMap((participant, participantIndex) => {
+    const roundDescription = participant.description ?? session.description;
+    const partnerCount = participant.entrants.length;
+
+    return participant.entrants.map((entrant, entrantIndex) => {
+      const isLastGroupRound = participantIndex === groupRoundCount - 1;
+      const description = entrant.description ?? roundDescription;
+
+      return {
+        workSeconds: Math.max(
+          1,
+          Math.floor(
+            entrant.workSeconds ?? participant.workSeconds ?? session.workSeconds,
+          ),
+        ),
+        restSeconds: isLastGroupRound
+          ? 0
+          : Math.max(
+              0,
+              Math.floor(
+                entrant.restSeconds ??
+                  participant.restSeconds ??
+                  session.restSeconds,
+              ),
+            ),
+        label: entrant.name,
+        description,
+        entrants: [{ name: entrant.name, description }],
+        groupRound: participantIndex + 1,
+        groupRoundCount,
+        partnerPosition: entrantIndex + 1,
+        partnerCount,
+      };
+    });
+  });
+};
+
+/**
+ * Resolves a session to concrete timer intervals. Group Training expands each
+ * configured round into sequential partner turns; Pair Training keeps one
+ * shared interval per pair. Explicit and uniform sessions resolve normally.
  */
 export const resolveRounds = (session: RoundsSource): ResolvedRound[] => {
   if (session.participants && session.participants.length > 0) {
-    return resolveParticipantRounds(session.participants, session);
+    const mode =
+      session.trainingMode ??
+      (session.participants.every(
+        (participant) => participant.entrants.length === 2,
+      )
+        ? 'pair'
+        : 'group');
+
+    return mode === 'group'
+      ? resolveGroupRounds(session.participants, session)
+      : resolveSharedParticipantRounds(session.participants, session);
   }
 
   if (session.roundsConfig && session.roundsConfig.length > 0) {
@@ -61,7 +130,7 @@ export const resolveRounds = (session: RoundsSource): ResolvedRound[] => {
       workSeconds: Math.max(1, Math.floor(round.workSeconds)),
       // The final round never has a trailing rest — the session ends on its work.
       restSeconds: index < last ? Math.max(0, Math.floor(round.restSeconds)) : 0,
-      description: session.description,
+      description: round.description ?? session.description,
     }));
   }
 

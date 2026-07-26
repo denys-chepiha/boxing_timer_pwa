@@ -5,12 +5,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSessions } from '@/app/SessionsProvider';
 
 // Components
-import { NamePickerField } from '@/components/NamePickerField';
+import { IconButton } from '@/components/IconButton';
+import { ArrowLeftIcon, CheckIcon, CopyIcon } from '@/components/Icons';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { SessionDetailsPanel } from '@/components/SessionDetailsPanel';
 import { TimeWheelField } from '@/components/TimeWheelField';
+import { TrainingTypeSheet } from '@/components/TrainingTypeSheet/TrainingTypeSheet';
 
 // Hooks
+import { TimingMode, useRoundsConfig } from '@/hooks/useRoundsConfig/useRoundsConfig';
 import { soundOptions, useSound } from '@/hooks/useSound';
 
 // Navigation
@@ -24,23 +28,14 @@ import { settingsStorage } from '@/storage/settingsStorage';
 import { useTheme } from '@/theme/ThemeProvider';
 
 // Types
-import { Participant, RoundConfig, SessionCategory, SoundId } from '@/types/models';
+import { SessionCategory, SoundId } from '@/types/models';
 
 // Utils
-import { createId } from '@/utils/id';
+import { copyToClipboard } from '@/utils/clipboard';
 import { notify } from '@/utils/dialog';
-import { resolveRounds, sumRounds } from '@/utils/rounds';
 import { formatSecondsToClock } from '@/utils/timeFormat';
 // Consts
 import { plainTextInputProps } from '@/consts/forms';
-
-type TimingMode = 'uniform' | 'custom';
-
-/** A participant is "customized" once any of its round overrides has a value. */
-const isCustomized = (participant: Participant): boolean =>
-  participant.workSeconds !== undefined ||
-  participant.restSeconds !== undefined ||
-  participant.description !== undefined;
 
 const categoryOptions: { label: string; value: SessionCategory }[] = [
   { label: 'Boxing', value: 'boxing' },
@@ -51,6 +46,8 @@ const categoryOptions: { label: string; value: SessionCategory }[] = [
 const timingModeOptions: { label: string; value: TimingMode }[] = [
   { label: 'Same for all', value: 'uniform' },
   { label: 'Per round', value: 'custom' },
+  { label: 'Group Training', value: 'group' },
+  { label: 'Pair Training', value: 'pair' },
 ];
 
 const soundLabel = (label: string) =>
@@ -72,30 +69,16 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
   }, [getById, route.params?.sessionId]);
 
   const [name, setName] = useState(current?.name ?? '');
-  const [category, setCategory] = useState<SessionCategory>(current?.category ?? 'boxing');
-  const [rounds, setRounds] = useState(current?.rounds ?? 3);
-  const [workSeconds, setWorkSeconds] = useState(current?.workSeconds ?? 180);
-  const [restSeconds, setRestSeconds] = useState(current?.restSeconds ?? 60);
+  const [category, setCategory] = useState<SessionCategory>(
+    current?.category ?? route.params?.category ?? 'boxing',
+  );
   const [soundId, setSoundId] = useState<SoundId>(current?.soundId ?? 'boxing-gong');
-  const [mode, setMode] = useState<TimingMode>(current?.roundsConfig?.length ? 'custom' : 'uniform');
-  const [roundList, setRoundList] = useState<RoundConfig[]>(() =>
-    current?.roundsConfig?.length
-      ? current.roundsConfig.map((round) => ({ ...round }))
-      : resolveRounds({
-          rounds: current?.rounds ?? 3,
-          workSeconds: current?.workSeconds ?? 180,
-          restSeconds: current?.restSeconds ?? 60,
-        }),
-  );
   const [description, setDescription] = useState(current?.description ?? '');
-  const [participants, setParticipants] = useState<Participant[]>(
-    () =>
-      current?.participants?.map((participant) => ({
-        ...participant,
-        entrants: participant.entrants.map((entrant) => ({ ...entrant })),
-      })) ?? [],
-  );
   const [roster, setRoster] = useState<string[]>([]);
+  const [typeSheetOpen, setTypeSheetOpen] = useState(false);
+  const [copiedRoundIndex, setCopiedRoundIndex] = useState<number | null>(null);
+
+  const training = useRoundsConfig(current);
 
   useEffect(() => {
     if (current) {
@@ -136,145 +119,32 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
     };
   }, []);
 
-  const totals = useMemo(() => sumRounds(roundList), [roundList]);
-
-  const addParticipant = () => {
-    setParticipants((list) => [...list, { id: createId(), entrants: [{ name: '' }] }]);
-  };
-
-  const removeParticipant = (id: string) => {
-    setParticipants((list) => list.filter((participant) => participant.id !== id));
-  };
-
-  const moveParticipant = (index: number, direction: -1 | 1) => {
-    setParticipants((list) => {
-      const target = index + direction;
-      if (target < 0 || target >= list.length) {
-        return list;
-      }
-      const next = [...list];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
-  };
-
-  const updateParticipant = (id: string, patch: Partial<Participant>) => {
-    setParticipants((list) =>
-      list.map((participant) => (participant.id === id ? { ...participant, ...patch } : participant)),
-    );
-  };
-
-  const updateEntrantName = (id: string, entrantIndex: number, value: string) => {
-    setParticipants((list) =>
-      list.map((participant) =>
-        participant.id === id
-          ? {
-              ...participant,
-              entrants: participant.entrants.map((entrant, i) =>
-                i === entrantIndex ? { ...entrant, name: value } : entrant,
-              ),
-            }
-          : participant,
-      ),
-    );
-  };
-
-  const updateEntrantDescription = (id: string, entrantIndex: number, value: string) => {
-    setParticipants((list) =>
-      list.map((participant) =>
-        participant.id === id
-          ? {
-              ...participant,
-              entrants: participant.entrants.map((entrant, i) =>
-                i === entrantIndex ? { ...entrant, description: value || undefined } : entrant,
-              ),
-            }
-          : participant,
-      ),
-    );
-  };
-
-  const addEntrant = (id: string) => {
-    setParticipants((list) =>
-      list.map((participant) =>
-        participant.id === id ? { ...participant, entrants: [...participant.entrants, { name: '' }] } : participant,
-      ),
-    );
-  };
-
-  const removeEntrant = (id: string, entrantIndex: number) => {
-    setParticipants((list) =>
-      list.map((participant) =>
-        participant.id === id && participant.entrants.length > 1
-          ? { ...participant, entrants: participant.entrants.filter((_, i) => i !== entrantIndex) }
-          : participant,
-      ),
-    );
-  };
-
-  const toggleCustomize = (participant: Participant) => {
-    if (isCustomized(participant)) {
-      updateParticipant(participant.id, {
-        workSeconds: undefined,
-        restSeconds: undefined,
-        description: undefined,
-      });
-    } else {
-      updateParticipant(participant.id, { workSeconds, restSeconds });
-    }
-  };
-
-  // Every name already picked anywhere in this session, so the same boxer
-  // can't be assigned to two rounds (or twice in one pair) by mistake.
-  const usedNames = useMemo(() => {
-    const set = new Set<string>();
-    participants.forEach((participant) => {
-      participant.entrants.forEach((entrant) => {
-        const trimmed = entrant.name.trim();
-        if (trimmed) {
-          set.add(trimmed.toLowerCase());
-        }
-      });
-    });
-    return set;
-  }, [participants]);
-
-  const rosterOptionsFor = (currentName: string) => {
+  const rosterOptionsFor = (participantId: string, currentName: string) => {
     const currentKey = currentName.trim().toLowerCase();
-    return roster.filter((savedName) => savedName.toLowerCase() === currentKey || !usedNames.has(savedName.toLowerCase()));
+    const usedNames = training.usedNamesForParticipant(participantId);
+    return roster.filter(
+      (savedName) =>
+        savedName.toLowerCase() === currentKey ||
+        !usedNames.has(savedName.toLowerCase()),
+    );
   };
 
   const handleModeChange = (next: TimingMode) => {
-    if (next === mode) {
+    training.setMode(next);
+  };
+
+  const handleCopyRoundDescription = async (index: number) => {
+    const text = training.roundList[index]?.description?.trim();
+    if (!text) {
       return;
     }
-
-    if (next === 'custom') {
-      // Seed the per-round list from the uniform values for continuity.
-      setRoundList(resolveRounds({ rounds, workSeconds, restSeconds }));
-    } else if (roundList[0]) {
-      // Collapse back to uniform using the first round as the template.
-      setRounds(roundList.length);
-      setWorkSeconds(roundList[0].workSeconds);
-      setRestSeconds(Math.max(1, roundList[0].restSeconds || 60));
+    if (!(await copyToClipboard(text))) {
+      return;
     }
-
-    setMode(next);
-  };
-
-  const updateRound = (index: number, patch: Partial<RoundConfig>) => {
-    setRoundList((list) => list.map((round, i) => (i === index ? { ...round, ...patch } : round)));
-  };
-
-  const addRound = () => {
-    setRoundList((list) => {
-      const last = list[list.length - 1] ?? { workSeconds: 180, restSeconds: 60 };
-      return [...list, { workSeconds: last.workSeconds, restSeconds: last.restSeconds }];
-    });
-  };
-
-  const removeRound = (index: number) => {
-    setRoundList((list) => (list.length <= 1 ? list : list.filter((_, i) => i !== index)));
+    setCopiedRoundIndex(index);
+    window.setTimeout(() => {
+      setCopiedRoundIndex((current) => (current === index ? null : current));
+    }, 1500);
   };
 
   const save = async () => {
@@ -285,13 +155,51 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
 
     const trimmedDescription = description.trim() || undefined;
 
-    if (participants.length > 0) {
-      const cleanedParticipants = participants.map((participant) => ({
+    if (training.mode === 'group' || training.mode === 'pair') {
+      if (
+        training.mode === 'group' &&
+        training.participants.some(
+          (participant) => !participant.description?.trim(),
+        )
+      ) {
+        notify('Add workout instructions to every group round');
+        return;
+      }
+
+      const cleanedParticipants = training.participants.map((participant) => ({
         ...participant,
+        description: participant.description?.trim() || undefined,
+        workSeconds: Math.max(
+          1,
+          Math.floor(participant.workSeconds ?? training.workSeconds),
+        ),
+        restSeconds: Math.max(
+          0,
+          Math.floor(participant.restSeconds ?? training.restSeconds),
+        ),
         entrants: participant.entrants
-          .map((entrant) => ({ ...entrant, name: entrant.name.trim() }))
+          .map((entrant) => ({
+            ...entrant,
+            name: entrant.name.trim(),
+            description: entrant.description?.trim() || undefined,
+            workSeconds:
+              training.mode === 'group' &&
+              entrant.workSeconds !== undefined
+                ? Math.max(1, Math.floor(entrant.workSeconds))
+                : undefined,
+            restSeconds:
+              training.mode === 'group' &&
+              entrant.restSeconds !== undefined
+                ? Math.max(0, Math.floor(entrant.restSeconds))
+                : undefined,
+          }))
           .filter((entrant) => entrant.name.length > 0),
       }));
+
+      if (cleanedParticipants.length === 0) {
+        notify('Add at least one round');
+        return;
+      }
 
       if (cleanedParticipants.some((participant) => participant.entrants.length === 0)) {
         notify('Every person needs a name');
@@ -302,11 +210,13 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
         name: name.trim(),
         category,
         rounds: cleanedParticipants.length,
-        workSeconds,
-        restSeconds,
+        workSeconds: training.workSeconds,
+        restSeconds: training.restSeconds,
         roundsConfig: undefined,
-        description: trimmedDescription,
+        // Named training stores instructions on each configured round.
+        description: undefined,
         participants: cleanedParticipants,
+        trainingMode: training.mode,
         soundId,
       };
 
@@ -320,25 +230,35 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
       return;
     }
 
-    if (mode === 'custom') {
-      if (roundList.length < 1) {
+    if (training.mode === 'custom') {
+      if (training.roundList.length < 1) {
         notify('Add at least one round');
         return;
       }
-      if (roundList.some((round) => round.workSeconds < 1)) {
+      if (training.roundList.some((round) => round.workSeconds < 1)) {
         notify('Each round needs at least 1 second of work');
         return;
       }
 
+      const lastRoundIndex = training.roundList.length - 1;
+      const cleanedRoundList = training.roundList.map((round, index) => ({
+        ...round,
+        // The last round never rests — there's no next round to recover for.
+        restSeconds: index === lastRoundIndex ? 0 : round.restSeconds,
+        description: round.description?.trim() || undefined,
+      }));
+
       const draft = {
         name: name.trim(),
         category,
-        rounds: roundList.length,
-        workSeconds: roundList[0].workSeconds,
-        restSeconds: roundList[0].restSeconds,
-        roundsConfig: roundList,
-        description: trimmedDescription,
+        rounds: cleanedRoundList.length,
+        workSeconds: cleanedRoundList[0].workSeconds,
+        restSeconds: cleanedRoundList[0].restSeconds,
+        roundsConfig: cleanedRoundList,
+        // Per-round mode stores instructions on each configured round.
+        description: undefined,
         participants: undefined,
+        trainingMode: undefined,
         soundId,
       };
 
@@ -352,7 +272,7 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
       return;
     }
 
-    if (rounds < 1 || workSeconds < 1 || restSeconds < 1) {
+    if (training.rounds < 1 || training.workSeconds < 1 || training.restSeconds < 1) {
       notify('Values must be at least 1 second');
       return;
     }
@@ -360,12 +280,13 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
     const draft = {
       name: name.trim(),
       category,
-      rounds,
-      workSeconds,
-      restSeconds,
+      rounds: training.rounds,
+      workSeconds: training.workSeconds,
+      restSeconds: training.restSeconds,
       roundsConfig: undefined,
       description: trimmedDescription,
       participants: undefined,
+      trainingMode: undefined,
       soundId,
     };
 
@@ -379,10 +300,9 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
   };
 
   const labelStyle = {
-    fontSize: 12,
-    fontWeight: 900,
-    letterSpacing: 1.1,
-    textTransform: 'uppercase' as const,
+    fontSize: 14,
+    fontWeight: 800,
+    letterSpacing: 0,
     color: theme.colors.textMuted,
   };
 
@@ -391,361 +311,83 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
     borderStyle: 'solid' as const,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.card,
-    borderRadius: 8,
-    padding: 16,
+    borderRadius: 20,
+    padding: 18,
     display: 'flex',
     flexDirection: 'column' as const,
-    gap: 12,
-    boxShadow: theme.isDark ? 'none' : '0 12px 28px rgba(17, 24, 39, 0.06)',
+    gap: 14,
+    boxShadow: theme.isDark ? 'none' : '0 1px 2px rgba(21, 24, 32, 0.05), 0 12px 34px rgba(21, 24, 32, 0.07)',
   };
 
   const stepperButtonStyle = {
     width: 44,
     height: 42,
-    borderRadius: 6,
+    borderRadius: 12,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: 26,
-    fontWeight: 900,
-    backgroundColor: theme.colors.surfaceStrong,
+    fontSize: 22,
+    fontWeight: 700,
+    backgroundColor: theme.colors.card,
     color: theme.colors.text,
   } as const;
 
-  const roundGhostButtonStyle = {
-    minWidth: 32,
-    height: 32,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderStyle: 'solid' as const,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.card,
-    color: theme.colors.textMuted,
-    fontSize: 15,
-    fontWeight: 900,
-  };
+  const isTraining = training.mode === 'group' || training.mode === 'pair';
+  const currentModeLabel =
+    timingModeOptions.find((option) => option.value === training.mode)?.label ?? 'Type';
 
   return (
-    <div
-      className="app-shell scroll-area"
-      style={{
-        backgroundColor: theme.colors.background,
-        padding: '42px 14px 24px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <div
-        style={{
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.card,
-          borderRadius: 8,
-          padding: 14,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 10,
-        }}
-      >
-        <PrimaryButton label="Close" variant="secondary" size="sm" onPress={() => navigation.goBack()} />
-        <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
-          <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1.1, color: theme.colors.textMuted }}>
-            PROGRAM
+    <main className="app-shell editor-screen screen-enter">
+      <header className="editor-header">
+        <div className="editor-header__bar">
+          <IconButton
+            ariaLabel="Close"
+            icon={<ArrowLeftIcon />}
+            onPress={() => navigation.goBack()}
+          />
+          <div className="editor-header__identity">
+            <h1>
+              {current ? 'Edit workout' : 'New workout'}
+            </h1>
+            <p>{current ? 'Update your program' : 'Build a repeatable session'}</p>
           </div>
-          <h1
-            style={{
-              margin: '2px 0 0',
-              fontSize: 22,
-              fontWeight: 950,
-              lineHeight: 1.05,
-              color: theme.colors.text,
-            }}
-          >
-            {current ? 'Edit workout' : 'New workout'}
-          </h1>
+          <PrimaryButton label="Save" size="sm" onPress={save} />
         </div>
-        <PrimaryButton label="Save" size="sm" onPress={save} />
-      </div>
 
-      <div style={sectionStyle}>
-        <span style={labelStyle}>Session Name</span>
-        <input
-          {...plainTextInputProps}
-          type="text"
-          enterKeyHint="done"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Heavy Bag Drill"
-          style={{
-            height: 58,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.input,
-            borderRadius: 8,
-            padding: '0 16px',
-            fontSize: 17,
-            fontWeight: 800,
-            color: theme.colors.text,
-          }}
-        />
-      </div>
+        <div className="editor-header__fields">
+          <input
+            {...plainTextInputProps}
+            className="text-field editor-header__name"
+            type="text"
+            enterKeyHint="done"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Heavy Bag Drill"
+          />
+          <button
+            type="button"
+            aria-label="Type"
+            className="type-picker"
+            onClick={() => setTypeSheetOpen(true)}
+          >
+            <span className="type-picker__label">Type</span>
+            <span className="type-picker__value">
+              {currentModeLabel}
+            </span>
+          </button>
+        </div>
+      </header>
 
-      <div style={sectionStyle}>
+      <div className="scroll-area editor-content">
+      <section className="surface-section" style={sectionStyle}>
         <span style={labelStyle}>Category</span>
         <SegmentedControl value={category} onChange={setCategory} options={categoryOptions} maxPerRow={3} />
-      </div>
+      </section>
 
-      <div style={sectionStyle}>
-        <div>
-          <span style={labelStyle}>Description</span>
-          <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
-            Shown under the timer while this workout runs.
-          </div>
-        </div>
-        <textarea
-          {...plainTextInputProps}
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="e.g. Jab-cross-hook combos, light footwork"
-          rows={2}
-          style={{
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.input,
-            borderRadius: 8,
-            padding: '10px 14px',
-            fontSize: 15,
-            fontWeight: 700,
-            fontFamily: 'inherit',
-            color: theme.colors.text,
-            resize: 'vertical',
-          }}
-        />
-      </div>
-
-      <div style={sectionStyle}>
-        <div>
-          <span style={labelStyle}>Who's training ({participants.length})</span>
-          <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
-            Pick saved boxers to name each round. Add more than one to a round for pair or group
-            training under one clock. Manage the roster in Settings.
-          </div>
-        </div>
-
-        {participants.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {participants.map((participant, index) => {
-              const customized = isCustomized(participant);
-              return (
-                <div
-                  key={participant.id}
-                  style={{
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: theme.colors.border,
-                    backgroundColor: theme.colors.surface,
-                    borderRadius: 8,
-                    padding: 12,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 10,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                    <span style={{ fontSize: 15, fontWeight: 900, letterSpacing: 0.6, color: theme.colors.text }}>
-                      ROUND {index + 1}
-                    </span>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        type="button"
-                        onClick={() => moveParticipant(index, -1)}
-                        disabled={index === 0}
-                        aria-label={`Move person ${index + 1} up`}
-                        style={{ ...roundGhostButtonStyle, opacity: index === 0 ? 0.4 : 1 }}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveParticipant(index, 1)}
-                        disabled={index === participants.length - 1}
-                        aria-label={`Move person ${index + 1} down`}
-                        style={{
-                          ...roundGhostButtonStyle,
-                          opacity: index === participants.length - 1 ? 0.4 : 1,
-                        }}
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeParticipant(participant.id)}
-                        aria-label={`Remove person ${index + 1}`}
-                        style={roundGhostButtonStyle}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {participant.entrants.map((entrant, entrantIndex) => (
-                      <div key={entrantIndex} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <NamePickerField
-                            value={entrant.name}
-                            options={rosterOptionsFor(entrant.name)}
-                            onSelect={(next) => updateEntrantName(participant.id, entrantIndex, next)}
-                            onManageRoster={() => navigation.navigate('Settings')}
-                            placeholder={entrantIndex === 0 ? 'Select name' : 'Select partner'}
-                            ariaLabel={`Name ${entrantIndex + 1} for round ${index + 1}`}
-                          />
-                          {participant.entrants.length > 1 ? (
-                            <button
-                              type="button"
-                              onClick={() => removeEntrant(participant.id, entrantIndex)}
-                              aria-label={`Remove name ${entrantIndex + 1} from round ${index + 1}`}
-                              style={roundGhostButtonStyle}
-                            >
-                              ×
-                            </button>
-                          ) : null}
-                        </div>
-                        {participant.entrants.length > 1 ? (
-                          <input
-                            {...plainTextInputProps}
-                            type="text"
-                            enterKeyHint="done"
-                            aria-label={`Note for ${entrant.name || `partner ${entrantIndex + 1}`} in round ${index + 1}`}
-                            value={entrant.description ?? ''}
-                            onChange={(event) =>
-                              updateEntrantDescription(participant.id, entrantIndex, event.target.value)
-                            }
-                            placeholder={`Same as round${participant.description || description ? ` (${participant.description ?? description})` : ''}`}
-                            style={{
-                              height: 42,
-                              marginLeft: 12,
-                              borderWidth: 1,
-                              borderStyle: 'solid',
-                              borderColor: theme.colors.border,
-                              backgroundColor: theme.colors.input,
-                              borderRadius: 8,
-                              padding: '0 12px',
-                              fontSize: 13,
-                              fontWeight: 700,
-                              color: theme.colors.text,
-                            }}
-                          />
-                        ) : null}
-                      </div>
-                    ))}
-                    <PrimaryButton
-                      label="+ Add partner"
-                      variant="secondary"
-                      size="sm"
-                      onPress={() => addEntrant(participant.id)}
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => toggleCustomize(participant)}
-                    style={{
-                      alignSelf: 'flex-start',
-                      fontSize: 13,
-                      fontWeight: 800,
-                      color: theme.colors.primary,
-                      background: 'transparent',
-                      border: 'none',
-                    }}
-                  >
-                    {customized ? 'Using custom timing/description' : 'Customize timing & description'}
-                  </button>
-
-                  {customized ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                        <TimeWheelField
-                          label="WORK"
-                          valueSeconds={participant.workSeconds ?? workSeconds}
-                          onChange={(value) => updateParticipant(participant.id, { workSeconds: value })}
-                          minSeconds={1}
-                        />
-                        <TimeWheelField
-                          label="REST"
-                          valueSeconds={participant.restSeconds ?? restSeconds}
-                          onChange={(value) => updateParticipant(participant.id, { restSeconds: value })}
-                          minSeconds={0}
-                        />
-                      </div>
-                      <input
-                        {...plainTextInputProps}
-                        type="text"
-                        enterKeyHint="done"
-                        aria-label={`Description for round ${index + 1}`}
-                        value={participant.description ?? ''}
-                        onChange={(event) =>
-                          updateParticipant(participant.id, { description: event.target.value })
-                        }
-                        placeholder={description || 'What to do this round'}
-                        style={{
-                          height: 48,
-                          borderWidth: 1,
-                          borderStyle: 'solid',
-                          borderColor: theme.colors.border,
-                          backgroundColor: theme.colors.input,
-                          borderRadius: 8,
-                          padding: '0 14px',
-                          fontSize: 14,
-                          fontWeight: 700,
-                          color: theme.colors.text,
-                        }}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
-
-        <PrimaryButton label="+ Add person" variant="secondary" onPress={addParticipant} />
-      </div>
-
-      {participants.length === 0 ? (
-        <div style={sectionStyle}>
-          <div>
-            <span style={labelStyle}>Round timing</span>
-            <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
-              Use one interval for every round, or set each round and rest individually.
-            </div>
-          </div>
-          <SegmentedControl value={mode} onChange={handleModeChange} options={timingModeOptions} maxPerRow={2} />
-        </div>
-      ) : (
-        <div style={sectionStyle}>
-          <div>
-            <span style={labelStyle}>Default timing</span>
-            <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
-              Each person uses this unless customized above. Rounds: {participants.length} — one per
-              person.
-            </div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-            <TimeWheelField label="WORK" valueSeconds={workSeconds} onChange={setWorkSeconds} minSeconds={1} />
-            <TimeWheelField label="REST" valueSeconds={restSeconds} onChange={setRestSeconds} minSeconds={1} />
-          </div>
-        </div>
-      )}
-
-      {participants.length === 0 && mode === 'uniform' ? (
+      {training.mode === 'uniform' ? (
         <>
           <div
+            className="rounds-stepper-section"
             style={{
               ...sectionStyle,
               flexDirection: 'row',
@@ -753,135 +395,161 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
               justifyContent: 'space-between',
             }}
           >
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 20, fontWeight: 900, color: theme.colors.text }}>Rounds</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>Total work cycles</div>
+            <div className="rounds-stepper-section__copy">
+              <h2>Rounds</h2>
+              <p>Total work cycles</p>
             </div>
 
-            <div
-              style={{
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.surface,
-                borderRadius: 8,
-                minHeight: 52,
-                padding: 5,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <button type="button" onClick={() => setRounds((value) => Math.max(1, value - 1))} style={stepperButtonStyle}>
+            <div className="stepper">
+              <button
+                type="button"
+                className="stepper__button"
+                onClick={() => training.setRounds((value) => Math.max(1, value - 1))}
+                style={stepperButtonStyle}
+              >
                 -
               </button>
-              <span style={{ minWidth: 44, textAlign: 'center', fontSize: 21, fontWeight: 950, color: theme.colors.text }}>
-                {rounds}
+              <span className="stepper__value">
+                {training.rounds}
               </span>
-              <button type="button" onClick={() => setRounds((value) => value + 1)} style={stepperButtonStyle}>
+              <button
+                type="button"
+                className="stepper__button"
+                onClick={() => training.setRounds((value) => value + 1)}
+                style={stepperButtonStyle}
+              >
                 +
               </button>
             </div>
           </div>
 
-          <div style={sectionStyle}>
+          <section className="surface-section" style={sectionStyle}>
             <div>
               <span style={labelStyle}>Timing</span>
-              <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700, color: theme.colors.textMuted }}>
+              <div className="section-description">
                 Set the active interval and recovery interval.
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-              <TimeWheelField label="WORK" valueSeconds={workSeconds} onChange={setWorkSeconds} minSeconds={1} />
-              <TimeWheelField label="REST" valueSeconds={restSeconds} onChange={setRestSeconds} minSeconds={1} />
+            <div className="timing-grid">
+              <TimeWheelField label="WORK" valueSeconds={training.workSeconds} onChange={training.setWorkSeconds} minSeconds={1} />
+              <TimeWheelField label="REST" valueSeconds={training.restSeconds} onChange={training.setRestSeconds} minSeconds={1} />
             </div>
-          </div>
+          </section>
         </>
       ) : null}
 
-      {participants.length === 0 && mode === 'custom' ? (
-        <div style={sectionStyle}>
+      {training.mode === 'custom' ? (
+        <section className="surface-section" style={sectionStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-            <span style={labelStyle}>Rounds ({roundList.length})</span>
+            <span style={labelStyle}>Rounds ({training.roundList.length})</span>
             <span style={{ fontSize: 13, fontWeight: 800, color: theme.colors.textMuted }}>
-              Total {formatSecondsToClock(totals.total)}
+              Total {formatSecondsToClock(training.totals.total)}
             </span>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {roundList.map((round, index) => {
-              const isLast = index === roundList.length - 1;
+          <div className="round-config-list">
+            {training.roundList.map((round, index) => {
+              const isLast = index === training.roundList.length - 1;
               return (
                 <div
                   key={index}
-                  style={{
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: theme.colors.border,
-                    backgroundColor: theme.colors.surface,
-                    borderRadius: 8,
-                    padding: 12,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 10,
-                  }}
+                  className="round-config"
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                    <span style={{ fontSize: 15, fontWeight: 900, letterSpacing: 0.6, color: theme.colors.text }}>
+                  <div className="round-config__header">
+                    <span className="round-config__title">
                       ROUND {index + 1}
                     </span>
                     <button
                       type="button"
-                      onClick={() => removeRound(index)}
-                      disabled={roundList.length <= 1}
+                      onClick={() => training.removeRound(index)}
+                      disabled={training.roundList.length <= 1}
                       aria-label={`Remove round ${index + 1}`}
-                      style={{
-                        minWidth: 36,
-                        height: 32,
-                        borderRadius: 6,
-                        borderWidth: 1,
-                        borderStyle: 'solid',
-                        borderColor: theme.colors.border,
-                        backgroundColor: theme.colors.card,
-                        color: theme.colors.textMuted,
-                        fontSize: 18,
-                        fontWeight: 900,
-                        opacity: roundList.length <= 1 ? 0.4 : 1,
-                      }}
+                      className="round-action"
                     >
                       ×
                     </button>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                  <div className="timing-grid" data-single={isLast}>
                     <TimeWheelField
                       label="WORK"
                       valueSeconds={round.workSeconds}
-                      onChange={(value) => updateRound(index, { workSeconds: value })}
+                      onChange={(value) => training.updateRound(index, { workSeconds: value })}
                       minSeconds={1}
                     />
-                    <TimeWheelField
-                      label={isLast ? 'REST AFTER' : 'REST'}
-                      valueSeconds={round.restSeconds}
-                      onChange={(value) => updateRound(index, { restSeconds: value })}
-                      minSeconds={0}
+                    {!isLast ? (
+                      <TimeWheelField
+                        label="REST"
+                        valueSeconds={round.restSeconds}
+                        onChange={(value) => training.updateRound(index, { restSeconds: value })}
+                        minSeconds={0}
+                      />
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <label htmlFor={`round-${index}-description`} className="field-label" style={{ marginBottom: 0 }}>
+                        Description
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyRoundDescription(index)}
+                        disabled={!round.description?.trim()}
+                        aria-label={`Copy round ${index + 1} description`}
+                        className="round-action"
+                      >
+                        {copiedRoundIndex === index ? <CheckIcon size={15} /> : <CopyIcon size={15} />}
+                      </button>
+                    </div>
+                    <textarea
+                      {...plainTextInputProps}
+                      id={`round-${index}-description`}
+                      aria-label={`Description for round ${index + 1}`}
+                      value={round.description ?? ''}
+                      onChange={(event) => training.updateRound(index, { description: event.target.value })}
+                      placeholder="e.g. Jab-cross-hook combos, light footwork"
+                      rows={2}
+                      className="text-field"
                     />
                   </div>
-                  {isLast ? (
-                    <span style={{ fontSize: 12, fontWeight: 700, color: theme.colors.textMuted }}>
-                      Rest after the last round is optional — set 00:00 to finish right away.
-                    </span>
-                  ) : null}
                 </div>
               );
             })}
           </div>
 
-          <PrimaryButton label="+ Add round" variant="secondary" onPress={addRound} />
-        </div>
+          <PrimaryButton label="+ Add round" variant="secondary" onPress={training.addRound} />
+        </section>
       ) : null}
 
-      <div style={sectionStyle}>
+      {isTraining ? (
+        <SessionDetailsPanel
+          training={training}
+          rosterOptionsFor={rosterOptionsFor}
+          onManageRoster={() => navigation.navigate('Settings')}
+        />
+      ) : null}
+
+      {training.mode === 'uniform' ? (
+        <section className="surface-section" style={sectionStyle}>
+          <div>
+            <span style={labelStyle}>Description</span>
+            <div className="section-description">
+              Shown under the timer while this workout runs.
+            </div>
+          </div>
+          <textarea
+            {...plainTextInputProps}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="e.g. Jab-cross-hook combos, light footwork"
+            rows={2}
+            className="text-field"
+          />
+        </section>
+      ) : null}
+
+      <section className="surface-section" style={sectionStyle}>
         <span style={labelStyle}>Alert Sound</span>
         <SegmentedControl
           value={soundId}
@@ -892,7 +560,19 @@ export const SessionEditorScreen = ({ navigation, route }: ScreenProps<'SessionE
           options={soundOptions.map((option) => ({ label: soundLabel(option.label), value: option.id }))}
           maxPerRow={3}
         />
+      </section>
       </div>
-    </div>
+
+      <TrainingTypeSheet
+        open={typeSheetOpen}
+        value={training.mode}
+        options={timingModeOptions}
+        onSelect={(next) => {
+          handleModeChange(next);
+          setTypeSheetOpen(false);
+        }}
+        onClose={() => setTypeSheetOpen(false)}
+      />
+    </main>
   );
 };

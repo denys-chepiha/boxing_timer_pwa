@@ -19,6 +19,7 @@ type SessionDraft = {
   roundsConfig?: RoundConfig[];
   description?: string;
   participants?: Participant[];
+  trainingMode?: 'group' | 'pair';
   soundId: SoundId;
 };
 
