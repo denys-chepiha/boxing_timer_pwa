@@ -263,7 +263,9 @@ export const useRunAudio = ({ enabled, status, soundId, revision, getTimeline }:
       return;
     }
 
-    const shouldHold = enabled && (status === 'running' || status === 'paused');
+    // A paused timer has no cues to keep alive. Stop the loop so it does not
+    // keep competing with music for the system's media controls.
+    const shouldHold = enabled && status === 'running';
 
     const assert = () => {
       const ctx = ctxRef.current;

@@ -10,6 +10,18 @@ import { MockAudioContext } from '@/test/setup';
 
 const ctx = () => MockAudioContext.instances[0];
 
+// jsdom does not update paused when the playback mocks run.
+const mockKeepAlivePlayback = () => {
+  const play = vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+    Object.defineProperty(this, 'paused', { configurable: true, value: false });
+    return Promise.resolve();
+  });
+  const pause = vi.spyOn(window.HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) {
+    Object.defineProperty(this, 'paused', { configurable: true, value: true });
+  });
+  return { play, pause };
+};
+
 // Simulates the user gesture that unlocks (resumes) the audio context.
 const unlock = async () => {
   await act(async () => {
@@ -55,6 +67,56 @@ describe('useRunAudio', () => {
       await Promise.resolve();
     });
     expect(ctx().sources).toHaveLength(0);
+  });
+
+  it.each(['idle', 'paused', 'finished'] as const)('does not start keep-alive audio when %s', async (status) => {
+    const { play } = mockKeepAlivePlayback();
+    renderHook(() => useRunAudio(baseProps({ status })));
+    await unlock();
+
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it('stops keep-alive audio on pause and does not restart it on foreground return', async () => {
+    const { play, pause } = mockKeepAlivePlayback();
+    const { rerender } = renderHook((props) => useRunAudio(props), {
+      initialProps: baseProps(),
+    });
+    await unlock();
+    expect(play).toHaveBeenCalledTimes(1);
+
+    rerender(baseProps({ status: 'paused' }));
+    expect(pause).toHaveBeenCalledTimes(1);
+
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    act(() => {
+      visibility.mockReturnValue('hidden');
+      document.dispatchEvent(new Event('visibilitychange'));
+      visibility.mockReturnValue('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('restarts keep-alive audio and schedules cues when the paused timer resumes', async () => {
+    const { play, pause } = mockKeepAlivePlayback();
+    const { rerender } = renderHook((props) => useRunAudio(props), {
+      initialProps: baseProps(),
+    });
+    await unlock();
+    await waitFor(() => expect(ctx().sources).toHaveLength(2));
+    const pendingCue = ctx().sources.find((source) => source.startedAt !== null && source.startedAt > 0.02);
+
+    rerender(baseProps({ status: 'paused' }));
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(pendingCue?.stopped).toBe(true);
+    ctx().state = 'suspended';
+    ctx().resume.mockClear();
+
+    rerender(baseProps({ status: 'running', revision: 'resumed' }));
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(2));
+    expect(ctx().resume).toHaveBeenCalled();
+    expect(ctx().sources).toHaveLength(4);
   });
 
   it('reschedules on revision change: cancels pending cues, lets started ones ring out', async () => {
